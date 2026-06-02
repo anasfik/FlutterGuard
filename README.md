@@ -4,7 +4,7 @@ FlutterGuard is an agent-native APK/AAB security review skill for Flutter Androi
 
 It is a pure agent skill for Claude Code, Codex, Cursor, OpenClaw, Gemini CLI, and other coding agents. Install or reference the single skill, then ask your agent to inspect a Flutter Android release artifact before shipping.
 
-FlutterGuard is not a CLI. It is not an APK scanner app. It is not a static analyzer. It is one operational agent skill plus documentation, examples, and safety boundaries for APK/AAB security review.
+FlutterGuard is not a CLI. It is not an APK scanner app. It is not a static analyzer. It is one operational agent skill plus safety boundaries for APK/AAB security review.
 
 ## Install
 
@@ -25,18 +25,15 @@ Use FlutterGuard to review this Flutter APK before release.
 Codex:
 
 - Start with `AGENTS.md`.
-- Use `examples/codex/prompt.md`.
 - Reference the repository root or `SKILL.md`.
 
 Claude Code:
 
 - Copy this repository, or its root `SKILL.md`, into your Claude Code skills location.
-- Use `examples/claude-code/install.md`.
 
 OpenClaw:
 
 - Add this repository as an instruction pack.
-- Use `examples/openclaw/install.md`.
 
 Other agents:
 
@@ -95,8 +92,6 @@ Requires Human Approval:
 ## Repository Map
 
 - `SKILL.md`: the installable FlutterGuard skill.
-- `examples/`: install notes, prompts, and realistic APK security report examples.
-- `docs/`: architecture, skill authoring, threat model, and roadmap for this one-skill repository.
 - `AGENTS.md`: project-level guidance for Codex-style agents working with this repo.
 - `SECURITY.md`: reporting and safety policy.
 
@@ -122,7 +117,3 @@ Safe agent work includes artifact inspection, evidence collection, Markdown repo
 ## Status
 
 FlutterGuard is currently a single agentic skill. The repository intentionally contains no CLI engine, generated binaries, APK fixtures, build output, scan outputs, installers, or CI wrappers.
-
-## License
-
-MIT License. See `LICENSE`.
