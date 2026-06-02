@@ -17,13 +17,36 @@ This is an agent workflow, not a standalone scanner. Inspect the artifact and re
 - Record exact evidence: file path, manifest node, resource path, package name, certificate subject, permission name, asset path, or extracted string context.
 - Redact secrets. Show only a short prefix/suffix or stable identifier when needed.
 - Treat decompiled Java/Kotlin/smali as evidence, not as source-of-truth app source. Flutter business logic is usually compiled into native snapshots inside `libapp.so`.
-- If the artifact is missing, ask the user for the APK/AAB path or continue with source-level Android review only if the user wants that.
+- If the artifact is missing but the user gives a published package name or Play Store listing, use `apkeep` when available to fetch the APK first, then inspect the downloaded artifact.
+- If neither an artifact nor a package/listing is available, ask the user for the APK/AAB path or continue with source-level Android review only if the user wants that.
+
+## Obtain A Published APK
+
+If the user wants review of a published app and has not provided an APK/AAB, use [`EFForg/apkeep`](https://github.com/EFForg/apkeep) when available to download the APK, then continue with the normal inspection workflow.
+
+Keep this bounded:
+
+- Only fetch apps the user is authorized to review, or public apps where artifact review is appropriate for the user's stated purpose.
+- Do not ask for or store Google account credentials. If Google Play access is needed, ask the user to provide the required email and AAS token for the command, and remind them to use an account where that risk is acceptable.
+- Respect app store terms and do not run bulk downloads or high-parallel fetches.
+- Record the download source, package name, requested version if any, and resulting APK path in the report.
+
+Safe examples:
+
+```sh
+apkeep -a com.example.app .
+apkeep -a com.example.app -d apk-pure .
+apkeep -a com.example.app -d google-play -e user@example.com -t AAS_TOKEN .
+```
+
+If `apkeep` is missing, tell the user and ask them to install it or provide the APK/AAB manually.
 
 ## Safe Commands
 
 Use whichever tools exist locally. If a tool is missing, say so and continue with the next best read-only method.
 
 ```sh
+apkeep -a com.example.app .
 file app-release.apk
 du -h app-release.apk
 unzip -l app-release.apk
