@@ -1,256 +1,128 @@
-# FlutterGuard CLI
+# FlutterGuard
 
-FlutterGuard CLI is a static analysis tool for Flutter Android APKs. It extracts security-relevant signals from application binaries and produces a structured report that can be used by engineering, security, compliance, and audit teams.
+FlutterGuard is an agent-native APK/AAB security review skill for Flutter Android releases.
 
-The tool is designed to be practical in real workflows:
-- Local-first analysis
-- Deterministic output location and structure
-- Optional AI summary generation for risk triage
-- Suitable for manual review, CI, and downstream automation
+It is a pure agent skill for Claude Code, Codex, Cursor, OpenClaw, Gemini CLI, and other coding agents. Install or reference the single skill, then ask your agent to inspect a Flutter Android release artifact before shipping.
 
-## Table of Contents
+FlutterGuard is not a CLI. It is not an APK scanner app. It is not a static analyzer. It is one operational agent skill plus documentation, examples, and safety boundaries for APK/AAB security review.
 
-1. [What It Analyzes](#what-it-analyzes)
-2. [Installation](#installation)
-3. [Quick Start](#quick-start)
-4. [Command Reference](#command-reference)
-5. [AI Remediation and OpenRouter](#ai-remediation-and-openrouter)
-6. [Output Structure and Expected Results](#output-structure-and-expected-results)
-7. [Common Workflows](#common-workflows)
-8. [Error Handling and Troubleshooting](#error-handling-and-troubleshooting)
-9. [Development](#development)
-10. [Contributing](#contributing)
-11. [License](#license)
+## Install
 
-## What It Analyzes
+Use the `skills/flutter-apk-security` folder with any agent platform that supports local skills, instruction packs, or project-level agent guidance.
 
-FlutterGuard performs static APK analysis and reports findings across:
+Recommended install:
 
-- Application metadata (package name, version, SDK targets)
-- Permissions and dangerous permission counts
-- URLs, domains, API endpoints, and network behavior hints
-- Hardcoded keys/secrets and configuration artifacts
-- Third-party packages, services, and SDK privacy impact indicators
-- Firebase and platform integration traces
-- SQL and local data storage indicators
-- Decompilation strategy/attempt metadata
-- Extracted files and visual resources for inspection
+- `skills/flutter-apk-security`
 
-## Installation
+Then ask:
 
-### Option 1: Build From Source
-
-Requirements:
-- Go 1.24+
-- Git
-
-```bash
-git clone https://github.com/flutterguard/flutterguard-cli.git
-cd flutterguard-cli
-go build -o build/flutterguard-cli .
-./build/flutterguard-cli --version
+```text
+Use FlutterGuard to review this Flutter APK before release.
 ```
 
-### Option 2: Install Script
+## Agent Platforms
 
-Linux/macOS:
+Codex:
 
-```bash
-curl -sSL https://raw.githubusercontent.com/flutterguard/flutterguard-cli/main/install.sh | bash
+- Start with `AGENTS.md`.
+- Use `examples/codex/prompt.md`.
+- Reference `skills/flutter-apk-security/SKILL.md`.
+
+Claude Code:
+
+- Copy `skills/flutter-apk-security` into your Claude Code skills location.
+- Use `examples/claude-code/install.md`.
+
+OpenClaw:
+
+- Add `skills/flutter-apk-security` as an instruction pack.
+- Use `examples/openclaw/install.md`.
+
+Other agents:
+
+- Point the agent at `skills/flutter-apk-security/SKILL.md`.
+- Include `AGENTS.md` as repository-level behavior guidance if your platform supports it.
+
+## What It Checks
+
+- APK/AAB metadata: package name, version, SDK levels, size, ABIs, native libraries, and Flutter evidence.
+- Android manifest risk: permissions, exported components, cleartext traffic, debug flags, backup behavior, providers, services, receivers, and deep links.
+- Embedded secret risk: resources, assets, Flutter assets, decompiled wrapper code, and readable strings from `libapp.so`.
+- Network security: cleartext settings, network security config, certificate trust signals, backend hosts, staging endpoints, and pinning context.
+- WebView and platform bridge risk: WebView flags, JavaScript bridges, MethodChannel/EventChannel names, and native wrapper attack surface.
+- Signing and release signals: APK signature verification, certificate identity, debug certificate indicators, and release evidence available from the artifact.
+- Third-party service signals: Firebase, Google Maps, AWS, Sentry, Stripe, RevenueCat, OneSignal, Supabase, analytics SDKs, and similar markers.
+
+## Skill
+
+`skills/flutter-apk-security`
+
+Use when an APK/AAB artifact exists or the user asks for Flutter Android artifact safety review.
+
+## Example Output
+
+```text
+FlutterGuard APK Security Report
+
+Artifact: build/app/outputs/flutter-apk/app-release.apk
+Flutter Evidence: confirmed
+Status: RISKY
+Score: 72/100
+
+Critical:
+- None found from available evidence.
+
+High Risk:
+- android:allowBackup is enabled for an app that appears to handle account data.
+  Evidence: AndroidManifest.xml application node.
+  Recommended action: Review backup policy and disable or constrain backup after human approval.
+
+Warnings:
+- Staging API hostname appears in libapp.so strings.
+  Evidence: lib/arm64-v8a/libapp.so strings, value redacted to host only.
+
+Informational:
+- Package: com.example.app
+- Target SDK: 35
+- ABIs: arm64-v8a, armeabi-v7a
+- Detected services: Firebase, Sentry
+
+Requires Human Approval:
+- Backup behavior change
+- Endpoint migration or rotation strategy
 ```
 
-Windows PowerShell:
+## Repository Map
 
-```powershell
-irm https://raw.githubusercontent.com/flutterguard/flutterguard-cli/main/install.ps1 | iex
-```
+- `skills/flutter-apk-security/`: the installable FlutterGuard skill.
+- `examples/`: install notes, prompts, and realistic APK security report examples.
+- `docs/`: architecture, skill authoring, threat model, and roadmap for this one-skill repository.
+- `AGENTS.md`: project-level guidance for Codex-style agents working with this repo.
+- `SECURITY.md`: reporting and safety policy.
 
-### Optional External Tools
+## Safety Philosophy
 
-FlutterGuard works without external tooling, but these can enrich analysis quality:
+FlutterGuard should not silently auto-fix sensitive production behavior.
 
-- `aapt2` for richer APK metadata extraction
-- `jadx` for improved decompilation in some cases
-- `openssl` for certificate inspection details
+Human approval is required for:
 
-## Quick Start
+- authentication changes
+- payment changes
+- permission removal or addition
+- dependency changes
+- signing configuration
+- publishing configuration
+- production environment configuration
+- API key migration
+- privacy or data collection behavior
+- deleting files from an app
 
-Run analysis for an APK:
+Safe agent work includes artifact inspection, evidence collection, Markdown reports, checklist notes, test suggestions, and non-invasive recommendations.
 
-```bash
-flutterguard-cli --apk app-release.apk --outDir ./results
-```
+## Status
 
-If `--outDir` is omitted, FlutterGuard writes to `./results` by default.
-
-## Command Reference
-
-Basic syntax:
-
-```bash
-flutterguard-cli --apk <path-to-apk> [flags]
-```
-
-Required flag:
-- `--apk`: Path to the APK file to analyze
-
-General flags:
-- `--outDir`: Base output directory (default: `results`)
-- `--verbose`: Enable verbose execution output
-- `--enable-network-and-dns-checks`: Enable network-backed enrichment checks
-- `--format`: `json|text` (retained for CLI compatibility; structured report output is generated in all cases)
-- `--version`: Print version and exit
-
-AI flags:
-- `--ai-remediation`: Enable AI summary generation
-- `--ai-provider`: `openai|openrouter|xai|gemini|claude`
-- `--ai-key`: API key for selected provider (or `FLUTTERGUARD_AI_KEY`)
-- `--ai-baseurl`: Optional custom API base URL
-- `--ai-model`: Optional model override
-
-## AI Remediation and OpenRouter
-
-OpenRouter is supported through an OpenAI-compatible API workflow.
-
-### Recommended OpenRouter Run
-
-```bash
-export FLUTTERGUARD_AI_KEY="your_openrouter_api_key"
-
-flutterguard-cli \
-  --apk "apks/app-arm64-v8a-release.apk" \
-  --outDir "./results" \
-  --ai-remediation \
-  --ai-provider openrouter \
-  --ai-baseurl "https://openrouter.ai/api/v1" \
-  --ai-model "openai/gpt-4o-mini" \
-  --verbose
-```
-
-Notes:
-- If `--ai-remediation` is enabled but `--ai-key` is missing, the CLI fails fast with a clear error.
-- Provider defaults are auto-filled when possible (`--ai-baseurl` and `--ai-model`).
-- `gemini` and `claude` are accepted as provider values but currently return a not-implemented error at runtime.
-
-## Output Structure and Expected Results
-
-For each scan, FlutterGuard creates:
-
-`results/{apk_name}/`
-
-Inside that folder:
-
-- `results.json`: Full machine-readable analysis report
-- `files/`: Extracted file artifacts (config/content/env/decompiled zip when present)
-- `resources/`: Extracted visual and media resources
-- `ai_summary.json`: AI summary metadata and text (only when AI remediation is enabled)
-- `ai_summary.md`: Human-readable AI summary (only when AI remediation is enabled)
-
-Expected behavior:
-
-1. Each run resets the target `{apk_name}` report folder before writing fresh results.
-2. `results.json` is always produced on successful analysis.
-3. If AI is enabled and AI provider call fails, fallback summary content is still written, and error context is captured in `ai_summary.json`.
-
-## Common Workflows
-
-### 1. Analyze a Local APK
-
-```bash
-flutterguard-cli --apk "apks/app-x86_64-release.apk" --outDir "./results"
-```
-
-### 2. Analyze with Network Enrichment
-
-```bash
-flutterguard-cli \
-  --apk "apks/app-arm64-v8a-release.apk" \
-  --outDir "./results" \
-  --enable-network-and-dns-checks
-```
-
-### 3. Analyze with AI Summary (OpenAI)
-
-```bash
-export FLUTTERGUARD_AI_KEY="your_openai_key"
-
-flutterguard-cli \
-  --apk "apks/app-arm64-v8a-release.apk" \
-  --outDir "./results" \
-  --ai-remediation \
-  --ai-provider openai \
-  --ai-model gpt-4o-mini
-```
-
-### 4. Analyze APKs with Special Characters in File Names
-
-```bash
-flutterguard-cli \
-  --apk "apks/app-arm64-v8a-release(1).apk" \
-  --outDir "./results"
-```
-
-## Error Handling and Troubleshooting
-
-FlutterGuard surfaces explicit errors for common workflow issues:
-
-- APK path does not exist
-- APK path points to a directory instead of a file
-- Unsupported `--ai-provider`
-- Missing API key when `--ai-remediation` is enabled
-- Unsupported or failing AI provider response
-- File copy/write failures in output directories
-
-Quick checks:
-
-```bash
-flutterguard-cli --version
-go test ./...
-```
-
-If you suspect stale output, remove the scan folder and rerun:
-
-```bash
-rm -rf "results/app-arm64-v8a-release"
-flutterguard-cli --apk "apks/app-arm64-v8a-release.apk" --outDir "./results"
-```
-
-## Development
-
-Build:
-
-```bash
-go build -o build/flutterguard-cli .
-```
-
-Test:
-
-```bash
-go test ./...
-```
-
-Format:
-
-```bash
-gofmt -w $(find . -name '*.go' -not -path './vendor/*')
-```
-
-## Contributing
-
-Contributions are welcome. Please open an issue or pull request with:
-
-- Clear problem statement
-- Reproduction steps
-- Proposed fix and rationale
-- Test coverage for behavior changes
-
-Before opening a PR:
-
-```bash
-go test ./...
-go vet ./...
-```
+FlutterGuard is currently a single agentic skill. The repository intentionally contains no CLI engine, generated binaries, APK fixtures, build output, scan outputs, installers, or CI wrappers.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License. See `LICENSE`.

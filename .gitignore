@@ -1,34 +1,25 @@
-# Build output
-build/
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Test binary
-*.test
-
-# Output of the go coverage tool
-*.out
-
-# Dependency directories
-vendor/
-
-# APK files
-apk/
-results/
-
-# IDE specific
-.vscode/
-.idea/
+# OS/editor noise
+.DS_Store
+Thumbs.db
 *.swp
 *.swo
 *~
+.idea/
+.vscode/
 
-# OS specific
-.DS_Store
-Thumbs.db
+# Local agent/runtime noise
+.codex/
+
+# Generated archives and temporary output
+*.zip
+*.tar
+*.tar.gz
+tmp/
 output/
+
+# Flutter app artifacts that should not be committed if examples are added later
 .dart_tool/
-apks/
+build/
+*.apk
+*.aab
+results/
