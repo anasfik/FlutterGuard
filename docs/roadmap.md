@@ -15,11 +15,11 @@
 - expanded WebView, deep link, storage, and network security checks
 - more realistic APK/AAB report examples
 - platform-specific install notes for agent tools
-- optional checklist files inside `skills/flutter-apk-security/`
+- optional supporting checklists referenced from root `SKILL.md`
 
 ## Phase 3
 
-- packaged releases of `skills/flutter-apk-security`
+- packaged releases of the root skill repository
 - versioned skill metadata
 - sample policies for teams and agencies
 - expanded report examples for app categories such as payments, health, location, and social apps

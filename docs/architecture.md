@@ -4,7 +4,7 @@ FlutterGuard is a pure agent skill repository. Its architecture is intentionally
 
 ## 1. Skill
 
-`skills/flutter-apk-security/` is the product. It is an agent-readable workflow for reviewing Flutter Android APK/AAB artifacts.
+Root `SKILL.md` is the product. It is an agent-readable workflow for reviewing Flutter Android APK/AAB artifacts.
 
 The skill defines:
 

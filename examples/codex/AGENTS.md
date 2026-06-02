@@ -4,7 +4,7 @@ Use FlutterGuard as operational instructions for Flutter Android APK/AAB securit
 
 Primary skill:
 
-- `skills/flutter-apk-security/SKILL.md`
+- `SKILL.md`
 
 Do not silently edit payment logic, authentication logic, permissions, signing configuration, dependency graph, publishing config, production environment config, API key migration, or privacy/data behavior.
 

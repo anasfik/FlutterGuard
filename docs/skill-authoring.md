@@ -2,7 +2,7 @@
 
 FlutterGuard currently contains one skill:
 
-- `skills/flutter-apk-security/SKILL.md`
+- `SKILL.md`
 
 The skill must contain YAML frontmatter:
 

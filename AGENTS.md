@@ -4,7 +4,7 @@ FlutterGuard is an agent-native APK/AAB security review skill for Flutter Androi
 
 ## Product Shape
 
-- `skills/flutter-apk-security/` is the product.
+- `SKILL.md` at the repository root is the product.
 - `examples/` shows prompts, install notes, and APK security report examples for agent platforms.
 - `docs/` explains architecture, skill authoring, threat model, and roadmap for the one-skill repository.
 
@@ -41,7 +41,7 @@ Safe automatic work may include generating reports, suggesting tests, formatting
 
 For documentation and the skill, check that:
 
-- `skills/flutter-apk-security/SKILL.md` has YAML frontmatter with `name` and `description`
+- root `SKILL.md` has YAML frontmatter with `name` and `description`
 - examples use realistic Flutter APK/AAB security findings
 - safety boundaries are explicit
 - README claims match this one-skill, agent-only repository

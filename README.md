@@ -8,11 +8,11 @@ FlutterGuard is not a CLI. It is not an APK scanner app. It is not a static anal
 
 ## Install
 
-Use the `skills/flutter-apk-security` folder with any agent platform that supports local skills, instruction packs, or project-level agent guidance.
+Use this repository directly with any agent platform that supports local skills, instruction packs, or project-level agent guidance. The skill entrypoint is the root `SKILL.md`.
 
 Recommended install:
 
-- `skills/flutter-apk-security`
+- `SKILL.md`
 
 Then ask:
 
@@ -26,21 +26,21 @@ Codex:
 
 - Start with `AGENTS.md`.
 - Use `examples/codex/prompt.md`.
-- Reference `skills/flutter-apk-security/SKILL.md`.
+- Reference the repository root or `SKILL.md`.
 
 Claude Code:
 
-- Copy `skills/flutter-apk-security` into your Claude Code skills location.
+- Copy this repository, or its root `SKILL.md`, into your Claude Code skills location.
 - Use `examples/claude-code/install.md`.
 
 OpenClaw:
 
-- Add `skills/flutter-apk-security` as an instruction pack.
+- Add this repository as an instruction pack.
 - Use `examples/openclaw/install.md`.
 
 Other agents:
 
-- Point the agent at `skills/flutter-apk-security/SKILL.md`.
+- Point the agent at the repository root or `SKILL.md`.
 - Include `AGENTS.md` as repository-level behavior guidance if your platform supports it.
 
 ## What It Checks
@@ -55,7 +55,7 @@ Other agents:
 
 ## Skill
 
-`skills/flutter-apk-security`
+`SKILL.md`
 
 Use when an APK/AAB artifact exists or the user asks for Flutter Android artifact safety review.
 
@@ -94,7 +94,7 @@ Requires Human Approval:
 
 ## Repository Map
 
-- `skills/flutter-apk-security/`: the installable FlutterGuard skill.
+- `SKILL.md`: the installable FlutterGuard skill.
 - `examples/`: install notes, prompts, and realistic APK security report examples.
 - `docs/`: architecture, skill authoring, threat model, and roadmap for this one-skill repository.
 - `AGENTS.md`: project-level guidance for Codex-style agents working with this repo.
