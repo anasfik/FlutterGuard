@@ -1,5 +1,9 @@
 # FlutterGuard
 
+> [!NOTE]
+> Maintained by **[Anas Fikhi](https://gwhyyy.com)** — Flutter & AI engineer. Available for contract work: [work@gwhyyy.com](mailto:work@gwhyyy.com) · [book a call](https://calendly.com/ffikhi-aanas/30min)
+
+
 FlutterGuard is an agent-native APK/AAB security review skill for Flutter Android releases.
 
 It is a pure agent skill for Claude Code, Codex, Cursor, OpenClaw, Gemini CLI, and other coding agents. Install or reference the single skill, then ask your agent to inspect a Flutter Android release artifact before shipping.
@@ -117,3 +121,11 @@ Safe agent work includes artifact inspection, evidence collection, Markdown repo
 ## Status
 
 FlutterGuard is currently a single agentic skill. The repository intentionally contains no CLI engine, generated binaries, APK fixtures, build output, scan outputs, installers, or CI wrappers.
+
+## Maintainer
+
+Built and maintained by **[Anas Fikhi](https://gwhyyy.com)** — Flutter & AI engineer.
+
+- Portfolio & case studies: <https://gwhyyy.com>
+- Contract work: <work@gwhyyy.com>
+- Book a call: <https://calendly.com/ffikhi-aanas/30min>
