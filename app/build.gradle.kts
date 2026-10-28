@@ -28,6 +28,8 @@ android {
                 this.storePassword = storePassword
                 this.keyAlias = keyAlias
                 this.keyPassword = keyPassword
+                // v1/v2 alone still installs, but v3 carries key-rotation proof.
+                enableV3Signing = true
             }
         }
     }
@@ -60,6 +62,7 @@ kotlin {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")

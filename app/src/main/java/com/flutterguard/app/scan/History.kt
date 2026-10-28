@@ -51,8 +51,8 @@ object History {
         val added = (b[FINDINGS].orEmpty().toSet()) - (a[FINDINGS].orEmpty().toSet())
         val removed = (a[FINDINGS].orEmpty().toSet()) - (b[FINDINGS].orEmpty().toSet())
         if (out.size > 40) {
-            val extra = out.size - 40
-            out.subList(40, out.size).clear()
+            val extra = out.size - 39
+            out.subList(39, out.size).clear()
             out += "… $extra more (see JSON export)"
         }
         if (added.isEmpty() && removed.isEmpty() && out.none { it.startsWith("~") }) {
@@ -73,7 +73,15 @@ object History {
                 else -> continue
             }
             val body = line.removePrefix(key)
-            map[key] = if (body.isBlank()) emptyList() else body.split('|')
+            val items = if (body.isBlank()) emptyList() else body.split('|')
+            // Findings are stored as severity|id pairs, so the field separator
+            // collides with the pair separator. Fold pairs back together; older
+            // snapshots on disk were written that way and must still diff.
+            map[key] = if (key == FINDINGS && items.size % 2 == 0) {
+                items.chunked(2).map { it.joinToString("|") }
+            } else {
+                items
+            }
         }
         return map
     }
