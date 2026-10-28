@@ -1,131 +1,168 @@
+<div align="center">
+
 # FlutterGuard
 
-> [!NOTE]
-> Maintained by **[Anas Fikhi](https://gwhyyy.com)** — Flutter & AI engineer. Available for contract work: [work@gwhyyy.com](mailto:work@gwhyyy.com) · [book a call](https://calendly.com/ffikhi-aanas/30min)
+**On-device security audit for Flutter apps — no root, no PC, no network.**
 
+Point it at any Flutter app installed on your phone and get the artifact inventory, the
+manifest risk surface, the endpoints it talks to, the secrets it ships, and a graded report
+you can hand to a developer or an AI agent.
 
-FlutterGuard is an agent-native APK/AAB security review skill for Flutter Android releases.
+[![Release](https://img.shields.io/github/v/release/anasfik/flutterguard?display_name=tag&sort=semver)](https://github.com/anasfik/flutterguard/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/android-8.0%2B-3ddc84.svg)](#install)
+[![No network](https://img.shields.io/badge/permissions-none%20beyond%20package%20visibility-success.svg)](#privacy)
 
-It is a pure agent skill for Claude Code, Codex, Cursor, OpenClaw, Gemini CLI, and other coding agents. Install or reference the single skill, then ask your agent to inspect a Flutter Android release artifact before shipping.
+<img src="docs/screenshots/01-apps.png" width="300" alt="Flutter apps detected on the device">
 
-FlutterGuard is not a CLI. It is not an APK scanner app. It is not a static analyzer. It is one operational agent skill plus safety boundaries for APK/AAB security review.
+</div>
+
+---
+
+## Why
+
+Flutter apps hide their logic in `libapp.so`, ship a 100 MB Dart kernel in debug builds, and
+bury API keys in assets, `resources.arsc` and native bridge libraries. The usual advice —
+"decompile it on your desktop with this toolchain" — is slow, fails on obfuscated AOT
+snapshots, and needs a matching Dart SDK.
+
+FlutterGuard does the part that works from the phone: it reads the APK the OS already exposes,
+parses the formats that matter (binary XML, `resources.arsc`, DEX strings, `libapp.so` string
+pool, `kernel_blob.bin`, `NOTICES.Z`, env files, X.509 blobs), and produces a report with
+evidence — all offline, no root, no interception.
+
+It is built to be **run repeatedly**: every scan is stored, so the second scan tells you what
+changed between two versions of the same app. That diff is where the real findings are.
+
+## Screenshots
+
+| Scan in progress | Report grade + artifact | Version diff |
+|---|---|---|
+| <img src="docs/screenshots/03-scanning.png" width="240"> | <img src="docs/screenshots/04-kooul-grade.png" width="240"> | <img src="docs/screenshots/02-diff-stable.png" width="240"> |
+
+## What it finds
+
+**Artifact** — package, version, SDK range, ABIs, size, split count, base APK hash, every native
+library with its size and SHA-256 prefix, installer, signing scheme (v1/v2/v3/v4), signer DN and
+certificate fingerprints, debug-certificate detection.
+
+**Flutter specifics** — is this really Flutter, AOT or debug (JIT kernel), `kernel_blob.bin` size,
+JIT snapshot presence, Dart engine version, obfuscation state, Dart package inventory recovered from
+`NOTICES.Z` and `package:` URIs, and a fingerprint you can hand to a desktop follow-up
+(Blutter/reFlutter need the exact engine build).
+
+**Manifest risk** — permissions, exported activities/services/receivers/providers, debuggable,
+backup, cleartext policy, network security config (base-config vs domain-config, loopback-only
+cleartext, user-CA trust, pin sets, debug-overrides), deep links aggregated per scheme.
+
+**Secrets and endpoints** — API keys (Google, AWS, Stripe, Supabase, Sentry, Firebase, OpenAI,
+GitHub, Slack, Sendgrid, Telegram), OAuth client IDs, JWT-like blobs, DB/broker URIs with inline
+credentials, private key blocks with a real body, embedded X.509 certificates (assembled from PEM
+body lines when a dump splits them), Dart `--dart-define` names, and `.env`/`.env.prod` files with
+credential counts.
+
+**Endpoints** — hosts across sources, classified `first-party` / `staging` / `internal` / `saas:X` /
+`ip-literal`, endpoint lists from YAML/TOML service configs (`uri: btc-electrum.example:50002`
+style), API routes from the Dart snapshot, Dart source paths, WebView risk flags, MethodChannel
+inventory split into `app` / `plugin` / `standard`.
+
+**Native surface** — `flutter_rust_bridge` and other FFI bridges, JNI `Java_*` entry point count.
 
 ## Install
 
-Use this repository directly with any agent platform that supports local skills, instruction packs, or project-level agent guidance. The skill entrypoint is the root `SKILL.md`.
+Download the signed APK from [Releases](https://github.com/anasfik/flutterguard/releases) and
+sideload it. Android 8.0+ (API 26). No Play Services required.
 
-Recommended install:
+The app declares exactly one permission, `QUERY_ALL_PACKAGES`, so it can see the other apps on the
+device. It has **no `INTERNET` permission** — every check is local, and nothing can leave the phone
+even by accident.
 
-- `SKILL.md`
+## Use
 
-Then ask:
+1. Open FlutterGuard — it lists the Flutter apps installed on the device (detection is done from
+   the APK contents, not from a manifest flag, so it also works on obfuscated and split APKs).
+2. Tap one. The scan takes 8–25 s for a release app, up to ~2 min for a 100 MB debug kernel.
+3. Read the report: grade, findings by severity with evidence, artifact, framework, endpoints,
+   routes, channels, dependencies.
+4. Scan the next version of the same app and compare — the **Changes since last scan** card lists
+   added/removed hosts, routes, dependencies and findings.
 
-```text
-Use FlutterGuard to review this Flutter APK before release.
+### Headless (batch / CI)
+
+```bash
+adb shell am start -n com.flutterguard.app/.MainActivity -e scan com.example.app
+adb logcat -d | grep FG_REPORT
+adb pull /sdcard/Android/data/com.flutterguard.app/files/reports/com_example_app.json
 ```
 
-## Agent Platforms
+A `<package>.hist` snapshot is written next to every report; it is what powers the diff.
 
-Codex:
+## Grades
 
-- Start with `AGENTS.md`.
-- Reference the repository root or `SKILL.md`.
+`A` clean, `C` well-built app with a few hardening gaps, `F` failed on something fundamental
+(debug build shipped, debug cert, cleartext everywhere, or shipped credentials). It is a triage
+label, not a score — read the findings, not the letter.
 
-Claude Code:
+## Corpus
 
-- Copy this repository, or its root `SKILL.md`, into your Claude Code skills location.
+Every detector in this project exists because a real app exposed the gap. `CORPUS.md` records the
+manual finding that produced each rule, from twelve apps:
 
-OpenClaw:
+| App | Grade | Nothing-special? |
+|---|---|---|
+| RustDesk, LocalSend, Hiddify | C / D | well-built baselines that must stay clean |
+| Immich, Obtainium | D / F | NSC semantics, user-CA trust, cleartext base-config |
+| Cake Wallet | D | scheme-less endpoint lists, pinned X.509, 123 JNI symbols |
+| FluffyChat | F | PEM-line certificate reassembly, `.arsc`-only Google key |
+| Spotube, AppFlowy | F | OpenSSL PEM labels that look like keys but are not |
+| Kooul | F | plaintext `.env.prod` with 13 credentials |
+| Bztamy | F | 113 MB JIT kernel, debug cert, debug build |
+| Primal | D | negative control: correctly identified as *not* Flutter |
 
-- Add this repository as an instruction pack.
+## Also a skill
 
-Other agents:
+`skill/SKILL.md` turns FlutterGuard into an audit workflow for coding agents (Claude Code, Codex,
+OpenClaw, …): how to run the app for repeatable and version-diff scans, and when to drop to a
+desktop toolchain for decompilation, AAB inspection, or real signature verification.
+`docs/METHODOLOGY.md` explains how each detector was derived from a manual observation.
 
-- Point the agent at the repository root or `SKILL.md`.
-- Include `AGENTS.md` as repository-level behavior guidance if your platform supports it.
+## Build
 
-## What It Checks
-
-- APK/AAB metadata: package name, version, SDK levels, size, ABIs, native libraries, and Flutter evidence.
-- Android manifest risk: permissions, exported components, cleartext traffic, debug flags, backup behavior, providers, services, receivers, and deep links.
-- Embedded secret risk: resources, assets, Flutter assets, decompiled wrapper code, and readable strings from `libapp.so`.
-- Network security: cleartext settings, network security config, certificate trust signals, backend hosts, staging endpoints, and pinning context.
-- WebView and platform bridge risk: WebView flags, JavaScript bridges, MethodChannel/EventChannel names, and native wrapper attack surface.
-- Signing and release signals: APK signature verification, certificate identity, debug certificate indicators, and release evidence available from the artifact.
-- Third-party service signals: Firebase, Google Maps, AWS, Sentry, Stripe, RevenueCat, OneSignal, Supabase, analytics SDKs, and similar markers.
-
-## Skill
-
-`SKILL.md`
-
-Use when an APK/AAB artifact exists or the user asks for Flutter Android artifact safety review.
-
-## Example Output
-
-```text
-FlutterGuard APK Security Report
-
-Artifact: build/app/outputs/flutter-apk/app-release.apk
-Flutter Evidence: confirmed
-Status: RISKY
-Score: 72/100
-
-Critical:
-- None found from available evidence.
-
-High Risk:
-- android:allowBackup is enabled for an app that appears to handle account data.
-  Evidence: AndroidManifest.xml application node.
-  Recommended action: Review backup policy and disable or constrain backup after human approval.
-
-Warnings:
-- Staging API hostname appears in libapp.so strings.
-  Evidence: lib/arm64-v8a/libapp.so strings, value redacted to host only.
-
-Informational:
-- Package: com.example.app
-- Target SDK: 35
-- ABIs: arm64-v8a, armeabi-v7a
-- Detected services: Firebase, Sentry
-
-Requires Human Approval:
-- Backup behavior change
-- Endpoint migration or rotation strategy
+```bash
+git clone https://github.com/anasfik/flutterguard.git
+cd flutterguard
+echo "sdk.dir=$ANDROID_HOME" > local.properties
+./gradlew assembleRelease        # signed APK in app/build/outputs/apk/release/
 ```
 
-## Repository Map
+Release builds are signed with a keystore expected at `.keystore/flutterguard.jks`, or override with
+`FG_KEYSTORE`, `FG_KEYSTORE_PASSWORD`, `FG_KEY_ALIAS`, `FG_KEY_PASSWORD`.
 
-- `SKILL.md`: the installable FlutterGuard skill.
-- `AGENTS.md`: project-level guidance for Codex-style agents working with this repo.
-- `SECURITY.md`: reporting and safety policy.
+## Privacy
 
-## Safety Philosophy
+Reports live in the app's private storage. Export uses a non-exported `FileProvider` on
+`cache/exports/`. The app cannot open a socket. Secrets found in `.env` and Firebase values are
+redacted in evidence; other findings include the matched string, so treat a report as sensitive.
 
-FlutterGuard should not silently auto-fix sensitive production behavior.
+## Limits
 
-Human approval is required for:
+Honest scope, because a tool that overstates itself is worse than none:
 
-- authentication changes
-- payment changes
-- permission removal or addition
-- dependency changes
-- signing configuration
-- publishing configuration
-- production environment configuration
-- API key migration
-- privacy or data collection behavior
-- deleting files from an app
+- Reads artifacts only. No runtime hooking, no traffic interception, no `/data/data` of other apps.
+- `libapp.so` is AOT machine code; the report gives strings, symbols and routes, not decompiled
+  Dart. Use a desktop toolchain with the matching engine build for that.
+- AABs are not supported — expand to APKs with `bundletool` first.
+- Signature verification is structural (schemes, signer identity), not a full `apksigner` check.
+- Some ROMs block APK reads for other apps; that is an OS policy, not a FlutterGuard setting.
 
-Safe agent work includes artifact inspection, evidence collection, Markdown reports, checklist notes, test suggestions, and non-invasive recommendations.
+## Legal
 
-## Status
-
-FlutterGuard is currently a single agentic skill. The repository intentionally contains no CLI engine, generated binaries, APK fixtures, build output, scan outputs, installers, or CI wrappers.
+Only scan apps you own or have written permission to test. FlutterGuard is an audit aid for
+developers, security researchers and bug-bounty participants working within scope.
 
 ## Maintainer
 
-Built and maintained by **[Anas Fikhi](https://gwhyyy.com)** — Flutter & AI engineer.
+Built by [Anas Fikhi](https://github.com/anasfik). Issues and corpus submissions are welcome —
+if you find a Flutter app that breaks a heuristic, open an issue with the report.
 
-- Portfolio & case studies: <https://gwhyyy.com>
-- Contract work: <work@gwhyyy.com>
-- Book a call: <https://calendly.com/ffikhi-aanas/30min>
+<div align="center"><sub>MIT licensed · offline by design</sub></div>

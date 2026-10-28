@@ -7,7 +7,29 @@ description: Review Flutter Android APK/AAB release artifacts for manifest, perm
 
 Use this skill when the user provides an Android APK/AAB, asks whether a Flutter Android release artifact is safe, or asks for review of Android artifact security, permissions, embedded secrets, manifest risks, or release signing signals.
 
-This is an agent workflow, not a standalone scanner. Inspect the artifact and report evidence. Do not silently change a user app's permissions, signing, dependencies, auth, payments, privacy behavior, production environment, publishing config, or API key migration strategy.
+This is an agent workflow first: inspect the artifact, report evidence, and keep the human in the loop. The repository also ships an Android app that automates part of this workflow on-device (see [Companion App](#companion-app)); the manual workflow below stays the reference for anything the app cannot see.
+
+Do not silently change a user app's permissions, signing, dependencies, auth, payments, privacy behavior, production environment, publishing config, or API key migration strategy.
+
+## Companion App
+
+This repository also contains FlutterGuard for Android (`app/`, package `com.flutterguard.app`): a Kotlin + Jetpack Compose app that runs the same rule families on the phone. It has no `INTERNET` permission and performs every scan locally; it requests only `QUERY_ALL_PACKAGES`, enumerates installed apps, and reads each app's `base.apk` plus splits through `publicSourceDir`. Results are written to app-specific external storage, `/sdcard/Android/data/com.flutterguard.app/files/reports/<package>.json` (pullable with `adb pull` even on the signed release build) (dots replaced by underscores, schema `flutterguard/report/1`), with a `<package>.hist` snapshot beside it.
+
+Prefer the app when:
+
+- the same phone must be scanned repeatedly (e.g. before each release) without pulling APKs to a desktop;
+- you want a sweep over many installed apps: there is no in-app batch button, but `adb shell am start -n com.flutterguard.app/.MainActivity -e scan <package>` runs one package per invocation and logs `FG_REPORT <path>` when the JSON is written;
+- you care about what an update changed: rescanning the same package computes a "Changes since last scan" diff of hosts, API routes, findings (`severity|id`), pub dependencies and version against the previous `.hist`.
+
+Stay with the manual workflow below when:
+
+- you need decompilation or source-level reasoning: `jadx`, `aapt2`, `apksigner`, `bundletool`, or Blutter/reFlutter against `libapp.so`;
+- the artifact is an AAB or a file the phone does not have installed — the app only scans installed packages;
+- you need cryptographic signature verification: the app detects which signing scheme blocks are present (v1/v2/v3/v3.1, source stamp, proof-of-rotation), it does not verify signatures;
+- you need network access: fetching an APK with `apkeep`, or checking whether a discovered endpoint is live;
+- the ROM blocks reading other apps' APKs (the app reports this as a read error, e.g. on some MIUI/HyperOS builds).
+
+The app's letter grade (A-F, `F` on any critical, otherwise weighted high/medium/low) is its own scale and is not the 100-point scoring below. A device report is a starting evidence set: confirm and expand it with this workflow before making release claims.
 
 ## Agent Operating Rules
 
