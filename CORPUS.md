@@ -118,3 +118,62 @@ signal that turns a scan into a rule change.
 The helper scripts and host-gold directories above are local session artifacts,
 not checked-in tools. These observations describe the original corpus runs;
 they do not prove later architecture or UI changes have passed device checks.
+
+## Second corpus wave — 22 production apps (release builds)
+
+Added 2026-10-30 to widen coverage beyond apps that happen to be on the
+author's phone. Every APK is a real release build taken from the project's own
+GitHub release, verified before install to contain `lib/arm64-v8a/libapp.so`
+(i.e. genuinely Flutter, AOT), and classified by FlutterGuard on device with no
+misses: **33 Flutter of 306 installed** after the install.
+
+APKs are kept outside the repo in `~/Downloads/.fgcorpus2/`, with
+`installed.tsv` mapping repo → package → size. Fetch and install are repeatable:
+
+```bash
+# one asset per repo, preferring arm64/universal; skip x86_64-only releases
+bash /tmp/opencode/install_flutter.sh        # downloads + verifies + installs
+bash /tmp/opencode/inst_par.sh               # re-entrant: installs whatever is new, 4-way
+```
+
+| App | Package | Category | Why it matters |
+|---|---|---|---|
+| Kazumi | `com.predidit.kazumi` | anime streaming | large asset bundle, many recovered URLs |
+| oneAnime | `com.predidit.oneanime` | anime streaming | same author, smaller surface |
+| Gopeed | `com.gopeed.gopeed` | downloader | Dart↔Go bridge, engine + native strings |
+| PiliPala | `com.guozhigq.pilipala` | video client | per-region hosts, signing + API keys |
+| PixEz | `com.perol.pixez` | image client | OAuth client ids, many hosts |
+| venera | `com.github.wgh136.venera` | comic reader | plugin-style endpoints |
+| Anx Reader | `com.anxcye.anx_reader` | ebook reader | sync endpoints, TTS plugins |
+| Openlib | `com.app.openlib` | ebook search | small surface baseline |
+| jasmine | `opensource.jmtt2mic` | manga reader | nested candidate routes |
+| KitchenOwl | `com.tombursch.kitchenowl` | self-hosted recipes | user-supplied base URL, TLS policy |
+| Conduit | `app.cogwheel.conduit` | Matrix client | homeserver override, cleartext paths |
+| AuthPass | `design.codeux.authpass.sideload` | password manager | should look clean; crypto libs |
+| Cashew | `com.budget.tracker_app` | finance | local-only baseline, few hosts |
+| OpenNutriTracker | `com.opennutritracker.ont.opennutritracker` | health | local DB, minimal network |
+| BeeCount | `com.tntlikely.beecount` | expenses | backup/export surface |
+| Harmony Music | `com.anandnet.harmonymusic` | music | YouTube/Saavik bridges |
+| Musify | `com.gokadzev.musify.fdroid` | music | F-Droid build, no Play deps |
+| Finamp | `com.unicornsonlsd.finamp` | Jellyfin client | user server URL + auth tokens |
+| namida | `com.msob7y.namida` | local music | large kernel, permission surface |
+| BloomeeTunes | `ls.bloomee.musicplayer` | music | streaming plugin set |
+| Echo-Loop | `app.echoloop` | media | 113 MB universal build |
+| Ghosten Player | `com.ghosten.player` | media player | native decoder libs |
+
+### What this wave is for
+
+These are the apps to re-run whenever a rule changes: 33 Flutter apps is enough
+that a detector which only fires on one hand-picked sample shows up as
+noise-or-silence across the set. Re-run guidance is unchanged — scan headless,
+pull the JSON, diff against the previous `.hist`:
+
+```bash
+adb shell am start -n com.flutterguard.app/.MainActivity -e scan com.gopeed.gopeed
+adb logcat -d | grep FG_REPORT
+adb pull /sdcard/Android/data/com.flutterguard.app/files/reports/com_gopeed_gopeed.json
+```
+
+Note for future fetches: the latest release assets of FlClash, PiliPlus,
+miru-app, JHenTai, pikapika, kelivo and Mangayomi are **x86_64-only** and cannot
+be installed on an arm64 phone; pick the arm64 asset when they publish one.
