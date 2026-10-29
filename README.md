@@ -36,9 +36,13 @@ you what changed between two versions of the same app. That diff is where the re
 
 ## Screenshots
 
-| Scan in progress | Report grade + artifact | Version diff |
+| Inventory | Report grade + artifact | Explore |
 |---|---|---|
-| <img src="docs/screenshots/03-scanning.png" width="240"> | <img src="docs/screenshots/04-kooul-grade.png" width="240"> | <img src="docs/screenshots/02-diff-stable.png" width="240"> |
+| <img src="docs/screenshots/01-apps.png" width="240"> | <img src="docs/screenshots/04-grade.png" width="240"> | <img src="docs/screenshots/05-explore.png" width="240"> |
+
+| Findings (dark) |
+|---|
+| <img src="docs/screenshots/06-findings-dark.png" width="240"> |
 
 ## What it finds
 
