@@ -2,6 +2,7 @@ package com.flutterguard.app.scan
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -10,42 +11,62 @@ import android.graphics.drawable.Drawable
 import android.os.Build
 import java.io.File
 
+/**
+ * One installed app as shown in the list. Deliberately platform-object free
+ * (only the nullable icon bitmap) and stable enough to cache across navigation;
+ * the scanner resolves its own [ApplicationInfo] by package name at scan time.
+ */
 data class InstalledApp(
     val packageName: String,
     val label: String,
     val versionName: String?,
     val versionCode: Long,
+    val minSdk: Int?,
+    val targetSdk: Int?,
     val isFlutter: Boolean,
     val isSystem: Boolean,
+    /** Base APK plus split APK sizes; 0 when unreadable. */
+    val sizeBytes: Long,
+    val splitCount: Int,
     val icon: Bitmap?,
-    val applicationInfo: ApplicationInfo,
 )
 
 /** Enumerates installed apps (requires QUERY_ALL_PACKAGES) and flags Flutter ones. */
 object Discovery {
 
+    /** Throws on package-manager failure: discovery errors must be surfaced, not shown as an empty list. */
     fun loadApps(context: Context): List<InstalledApp> {
         val pm = context.packageManager
-        val pkgs: List<android.content.pm.PackageInfo> = pm.getInstalledPackages(PackageManager.GET_META_DATA)
+        val pkgs: List<PackageInfo> = pm.getInstalledPackages(PackageManager.GET_META_DATA)
         val out = ArrayList<InstalledApp>(pkgs.size)
-        for (pi in pkgs) {
-            val ai = pi.applicationInfo ?: continue
-            val label = runCatching { pm.getApplicationLabel(ai).toString() }.getOrDefault(pi.packageName)
-            val versionCode = if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
-            out.add(
-                InstalledApp(
-                    packageName = pi.packageName,
-                    label = label,
-                    versionName = pi.versionName,
-                    versionCode = versionCode,
-                    isFlutter = runCatching { detectFlutter(ai) }.getOrDefault(false),
-                    isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
-                    icon = runCatching { drawableToBitmap(pm.getApplicationIcon(ai)) }.getOrNull(),
-                    applicationInfo = ai,
-                )
-            )
-        }
+        for (pi in pkgs) toInstalledApp(pm, pi)?.let(out::add)
         return out.sortedWith(compareByDescending<InstalledApp> { it.isFlutter }.thenBy { it.label.lowercase() })
+    }
+
+    /** Resolves one package. Throws [PackageManager.NameNotFoundException] when it is gone. */
+    fun load(context: Context, packageName: String): InstalledApp {
+        val pm = context.packageManager
+        val pi = pm.getPackageInfo(packageName, PackageManager.GET_META_DATA)
+        return toInstalledApp(pm, pi) ?: error("no application info for $packageName")
+    }
+
+    private fun toInstalledApp(pm: PackageManager, pi: PackageInfo): InstalledApp? {
+        val ai = pi.applicationInfo ?: return null
+        val label = runCatching { pm.getApplicationLabel(ai).toString() }.getOrDefault(pi.packageName)
+        val versionCode = if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+        return InstalledApp(
+            packageName = pi.packageName,
+            label = label,
+            versionName = pi.versionName,
+            versionCode = versionCode,
+            minSdk = ai.minSdkVersion.takeIf { it > 0 },
+            targetSdk = ai.targetSdkVersion.takeIf { it > 0 },
+            isFlutter = runCatching { detectFlutter(ai) }.getOrDefault(false),
+            isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+            sizeBytes = totalApkBytes(ai.publicSourceDir ?: ai.sourceDir, ai.splitSourceDirs),
+            splitCount = ai.splitSourceDirs?.size ?: 0,
+            icon = runCatching { drawableToBitmap(pm.getApplicationIcon(ai)) }.getOrNull(),
+        )
     }
 
     /**
@@ -91,4 +112,12 @@ object Discovery {
         d.draw(canvas)
         return bmp
     }
+}
+
+/** Base + split APK bytes on disk. Missing/unreadable parts contribute 0. */
+fun totalApkBytes(basePath: String?, splitPaths: Array<out String>?): Long {
+    var total = 0L
+    basePath?.let { total += File(it).length() }
+    splitPaths?.forEach { total += File(it).length() }
+    return total
 }

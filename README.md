@@ -31,8 +31,8 @@ parses the formats that matter (binary XML, `resources.arsc`, DEX strings, `liba
 pool, `kernel_blob.bin`, `NOTICES.Z`, env files, X.509 blobs), and produces a report with
 evidence — all offline, no root, no interception.
 
-It is built to be **run repeatedly**: every scan is stored, so the second scan tells you what
-changed between two versions of the same app. That diff is where the real findings are.
+It is built to be **run repeatedly**: every scan is stamped and kept, so the second scan tells
+you what changed between two versions of the same app. That diff is where the real findings are.
 
 ## Screenshots
 
@@ -63,8 +63,8 @@ credential counts.
 
 **Endpoints** — hosts across sources, classified `first-party` / `staging` / `internal` / `saas:X` /
 `ip-literal`, endpoint lists from YAML/TOML service configs (`uri: btc-electrum.example:50002`
-style), API routes from the Dart snapshot, Dart source paths, WebView risk flags, MethodChannel
-inventory split into `app` / `plugin` / `standard`.
+style), API routes from the Dart snapshot, recovered source paths, WebView risk flags,
+MethodChannel inventory split into `app` / `plugin` / `standard`.
 
 **Native surface** — `flutter_rust_bridge` and other FFI bridges, JNI `Java_*` entry point count.
 
@@ -73,19 +73,41 @@ inventory split into `app` / `plugin` / `standard`.
 Download the signed APK from [Releases](https://github.com/anasfik/flutterguard/releases) and
 sideload it. Android 8.0+ (API 26). No Play Services required.
 
-The app declares exactly one permission, `QUERY_ALL_PACKAGES`, so it can see the other apps on the
-device. It has **no `INTERNET` permission** — every check is local, and nothing can leave the phone
-even by accident.
+The app declares only package-visibility permissions so it can see the other apps on the device.
+It has **no `INTERNET` permission** — every check is local, and nothing can leave the phone even
+by accident.
 
 ## Use
 
 1. Open FlutterGuard — it lists the Flutter apps installed on the device (detection is done from
    the APK contents, not from a manifest flag, so it also works on obfuscated and split APKs).
-2. Tap one. The scan takes 8–25 s for a release app, up to ~2 min for a 100 MB debug kernel.
-3. Read the report: grade, findings by severity with evidence, artifact, framework, endpoints,
-   routes, channels, dependencies.
-4. Scan the next version of the same app and compare — the **Changes since last scan** card lists
-   added/removed hosts, routes, dependencies and findings.
+   The inventory stays loaded while you move between screens; pull the refresh action to rescan it.
+2. Tap one. A staged progress stepper shows the real pipeline (artifact → manifest → DEX strings →
+   native libraries → Dart kernel → assets). The scan runs in a foreground service, so leaving the
+   screen does not cancel it; a terminal notification tells you when it finished.
+3. Read the report across three panes:
+   - **Overview** — grade, severity summary, artifact + extraction/Flutter-check metadata,
+     signing, and *Changes since last scan*.
+   - **Findings** — severity-sorted findings with masked evidence and the matched value.
+     Tap *Reveal* on a row to see a value in place; nothing is revealed by default.
+   - **Explore** — endpoints (only openable when the URL is the one displayed), the candidate
+     route tree, dependencies with validated `pub.dev` links, recovered paths, channels, and the
+     APK artifact browser with bounded, provenance-aware previews.
+4. Long sections (routes, paths, dependencies) render a capped window with **See all** opening a
+   searchable full-screen list rather than one endless scroll.
+5. **Export** writes JSON or Markdown for the sections you tick. Sensitive values stay masked
+   unless you explicitly opt in for that export.
+6. Scan the next version of the same app and compare — the change card lists added/removed hosts,
+   routes, dependencies and findings. Every scan is appended to the app's version log, bounded and
+   atomic.
+
+### Scan many apps
+
+*Advanced → Scan all Flutter apps* queues every detected Flutter app, one at a time, behind a
+confirmation dialog that states the cost. The queue screen shows a determinate bar, per-app live
+stage and percentage, and per-app completion; a finished row opens that app's report, and *Cancel*
+asks for confirmation before stopping the run. A per-app timeout prevents one wedged scan from
+stalling the queue.
 
 ### Headless (batch / CI)
 
@@ -106,7 +128,8 @@ label, not a score — read the findings, not the letter.
 ## Corpus
 
 Every detector in this project exists because a real app exposed the gap. `CORPUS.md` records the
-manual finding that produced each rule, from twelve apps:
+manual finding that produced each rule, from eleven Flutter apps plus one non-Flutter negative
+control:
 
 | App | Grade | Nothing-special? |
 |---|---|---|
@@ -135,14 +158,32 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew assembleRelease        # signed APK in app/build/outputs/apk/release/
 ```
 
-Release builds are signed with a keystore expected at `.keystore/flutterguard.jks`, or override with
-`FG_KEYSTORE`, `FG_KEYSTORE_PASSWORD`, `FG_KEY_ALIAS`, `FG_KEY_PASSWORD`.
+Release builds read `FG_KEYSTORE`, `FG_KEYSTORE_PASSWORD`, `FG_KEY_ALIAS`, `FG_KEY_PASSWORD`, and
+fall back to `.keystore/flutterguard.jks`. Debug builds use the debug key.
+
+## Architecture
+
+- `scan/Scanner.kt` — the pipeline: artifact, manifest, DEX/native/kernel strings, assets, rules.
+  Supports cooperative cancellation and reports progress per stage.
+- `ScanService.kt` — the single scan owner (foreground `dataSync` service, one job at a time, a
+  permanent per-job token so a timed-out scan can never write into a newer report). UI and
+  headless entry points share it.
+- `ScanStore.kt` — observable scan state machine: idle, running, done, failed, cancelled.
+- `Inventory.kt` — process-scoped installed-app cache with explicit refresh; survives navigation.
+- `ReportFiles.kt` — atomic report and history writes (temp file, fsync, rename) plus inflight
+  markers used to explain an interrupted scan after a kill.
+- `scan/Model.kt` — report model; `Evidence.value` is private and in-memory only, snippets are
+  masked by construction, `scrubSecrets()` is applied before a report leaves the scanner.
+- `scan/ReportExport.kt` — section-selected JSON/Markdown, default-redacted.
+- `ui/` — Compose Material 3 screens, one semantic colour scheme, light and dark.
 
 ## Privacy
 
 Reports live in the app's private storage. Export uses a non-exported `FileProvider` on
-`cache/exports/`. The app cannot open a socket. Secrets found in `.env` and Firebase values are
-redacted in evidence; other findings include the matched string, so treat a report as sensitive.
+`cache/exports/`. The app cannot open a socket. Sensitive values are masked in the UI, in shared
+exports, and on the clipboard (marked sensitive) unless you explicitly reveal or opt in, and
+screens that can show a revealed value set `FLAG_SECURE` while they are up. Treat any report you
+export with sensitive values as sensitive.
 
 ## Limits
 
@@ -151,6 +192,8 @@ Honest scope, because a tool that overstates itself is worse than none:
 - Reads artifacts only. No runtime hooking, no traffic interception, no `/data/data` of other apps.
 - `libapp.so` is AOT machine code; the report gives strings, symbols and routes, not decompiled
   Dart. Use a desktop toolchain with the matching engine build for that.
+- Recovered routes are candidate strings grouped by prefix — not a navigation graph, and not proof
+  that a screen exists.
 - AABs are not supported — expand to APKs with `bundletool` first.
 - Signature verification is structural (schemes, signer identity), not a full `apksigner` check.
 - Some ROMs block APK reads for other apps; that is an OS policy, not a FlutterGuard setting.

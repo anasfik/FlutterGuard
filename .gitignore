@@ -7,3 +7,7 @@ local.properties
 .DS_Store
 captures/
 .keystore/
+
+# local working notes — not part of the app
+AGENTS.md
+docs/superpowers/

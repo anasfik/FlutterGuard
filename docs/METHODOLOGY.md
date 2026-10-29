@@ -1,7 +1,8 @@
 # Methodology: how the rule set was derived
 
 FlutterGuard's detectors were not designed from a checklist. They were derived from
-twelve real Flutter apps, each audited twice: once by hand on a desktop host
+eleven real Flutter apps, with Primal as a non-Flutter negative control. The
+Flutter corpus was audited twice: once by hand on a desktop host
 (`aapt2` + `unzip` + `strings` of `libapp.so`), and once by the Android app on a
 non-rooted phone. `CORPUS.md` holds the corpus table, the manual observations and
 the host/device gold paths; this document explains what each app changed in the

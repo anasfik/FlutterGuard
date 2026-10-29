@@ -1,6 +1,6 @@
 # FlutterGuard test corpus
 
-Twelve real Flutter apps, audited twice each: once by hand on the host
+Eleven Flutter apps and one non-Flutter negative control, audited twice each: once by hand on the host
 (`aapt2` + `unzip` + `strings` of `libapp.so`) and once by FlutterGuard on a
 non-rooted phone. Every rule in `scan/rules/` exists because a manual finding
 here proved the tool was blind to something. The host gold for each app lives
@@ -97,10 +97,12 @@ filtered by placeholder-credential matching.
 ## Re-running the corpus
 
 ```sh
-# build + install
-cd ~/Downloads/projects/real_projects/FlutterGuard
-~/tools/gradle-8.10.2/bin/gradle --offline assembleDebug 2>&1 | grep -E "^e:|BUILD"
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+# verify locally (does not install or distribute a debug APK)
+cd ~/Downloads/projects/real_projects/fg-remote
+flock /tmp/opencode/flutterguard-build.lock env ANDROID_HOME="$HOME/Android/Sdk" ANDROID_SDK_ROOT="$HOME/Android/Sdk" "$HOME/tools/gradle-8.10.2/bin/gradle" --offline testDebugUnitTest assembleDebug
+
+# Before device scans, install an approved signed release APK using the
+# existing signing identity. Never replace it with a debug or newly signed APK.
 
 # scan (headless intent) and pull the JSON
 cd /tmp/opencode && bash survey.sh ~/Downloads/.fgcorpus/apks2/*.apk
@@ -112,3 +114,7 @@ python3 /tmp/opencode/diffgold.py /tmp/opencode/survey/<pkg>.json /tmp/opencode/
 `diffgold.py` prints gold hosts the report missed, gold cert blobs versus
 `CRYPTO-X509` subjects, native-lib coverage and the severity spread — the
 signal that turns a scan into a rule change.
+
+The helper scripts and host-gold directories above are local session artifacts,
+not checked-in tools. These observations describe the original corpus runs;
+they do not prove later architecture or UI changes have passed device checks.

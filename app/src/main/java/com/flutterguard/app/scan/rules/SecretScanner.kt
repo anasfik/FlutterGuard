@@ -22,6 +22,19 @@ data class SecretRule(
     val group: Int = 1,               // capture group holding the secret
     /** Extra validation for noisy generic rules (raw string, captured value). */
     val accept: ((String, String) -> Boolean)? = null,
+    /** false = the matched value is a public identifier by design; its evidence
+     *  stays visible verbatim. true (default) = credential; snippet is masked. */
+    val secret: Boolean = true,
+    /** Honest framing appended to the finding detail (e.g. hypothesis labeling). */
+    val note: String? = null,
+)
+
+/** File extensions that mark a path as source or build artifact, not an endpoint.
+ *  Shared by [SecretScanner] route filtering and the route-tree helper. */
+internal val sourcePathExtensions = listOf(
+    ".dart", ".rs", ".proto", ".kt", ".java", ".swift", ".cc", ".cpp", ".c", ".h",
+    ".go", ".py", ".ts", ".js", ".m", ".mm", ".gradle", ".cmake", ".lock", ".so",
+    ".png", ".svg", ".ttf", ".otf",
 )
 
 /**
@@ -36,10 +49,16 @@ data class SecretRule(
  */
 class SecretScanner(private val appTokens: Set<String> = emptySet()) {
 
+    /** Static string markers are hypotheses: presence in the string pool is not
+     *  proof the code path is reachable or exploitable. */
+    private val MARKER_HYPOTHESIS =
+        " Static marker recovered from strings: a hypothesis about reachable code, not confirmed exploitation."
+
     val rules: List<SecretRule> = buildRules()
 
     val findings = ArrayList<Finding>()
     private val seen = HashMap<String, Int>() // ruleId+value -> evidence count
+    private val findingAt = HashMap<String, Int>() // ruleId+value -> index in findings
 
     /** host -> classification (kept for rule modules that only need the map). */
     val hosts: Map<String, String> get() = hostClass
@@ -74,24 +93,40 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
     var kernelStrings = 0L
         private set
 
-    private val urlRegex = Regex("""(?:https?|wss?)://[A-Za-z0-9\-._~]+(?::\d+)?(?:/[^\s"'<>\\]{0,120})?""")
+    private val urlRegex = Regex("""(?:https?|wss?)://(?:[A-Za-z0-9\-._~%:]+@)?[A-Za-z0-9\-._~]+(?::\d+)?(?:/[^\s"'<>\\]{0,120})?""")
+
+    /** Userinfo (`user:token@`) must never reach a stored host or sample URL. */
+    private val userInfoRegex = Regex("""//[^/@\s]+@""")
+
+    /** ponytail: gate scans over huge strings are windowed to 64 KiB — a
+     *  credential past that offset in a single string needs a case-sensitive
+     *  gate or a direct feed; raising this raises per-string scan cost. */
+    private val gateWindow = 64 * 1024
+
+    /** Case-insensitive gate match inside the bounded window; allocation-free. */
+    private fun gateHit(raw: String, gate: String): Boolean =
+        raw.indexOf(gate, 0, ignoreCase = true) in 0 until gateWindow
     private val channelRegex = Regex("""^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+){1,}/[A-Za-z0-9_.\-]+/?$""")
     private val packageRegex = Regex("""\bpackage:([a-z0-9_]+)/""")
 
     /** Single-pass prefilter: only these first segments can start a useful route. */
-    private val routePrefilter = Regex(
-        """/(?:api|auth|oauth|v[1-9]|admin|users?|account|login|logout|signup|register|password|payments|checkout|webhooks?|upload|download|search|health|config|notifications|chat|messages|graphql|profile)/"""
-    )
-    private val routeRegex = Regex(
-        """/(?:api|auth|oauth|v1|v2|v3|admin|users?|account|login|logout|signup|register|password|payments|checkout|webhooks?|upload|download|search|health|config|notifications|chat|messages|graphql|me|profile)/[A-Za-z0-9_\-{}:./]{2,72}"""
+    private val routePrefixes =
+        "api|auth|oauth|v[1-9]|admin|users?|account|login|logout|signup|register|password|payments|checkout|" +
+            "webhooks?|upload|download|search|health|config|notifications|chat|messages|graphql|me|profile|" +
+            // Candidate named-navigation routes (Navigator-style), outside the narrow API prefixes.
+            "settings|dashboard|splash|onboarding|welcome|home|main|feed|cart|orders?|products?|items?|" +
+            "details?|lists?|screens?|pages?"
+    private val routePrefilter = Regex("""/(?:$routePrefixes)/""")
+    private val routeRegex = Regex("""/(?:$routePrefixes)/[A-Za-z0-9_\-{}:./]{2,72}""")
+
+    /** Standalone single-segment named routes ("/profile") from Navigator code. */
+    private val standaloneRoutes = setOf(
+        "home", "login", "auth", "register", "settings", "profile", "dashboard", "splash",
+        "onboarding", "welcome", "main", "feed", "cart", "search", "checkout",
     )
 
     /** Trailing tokens that mark a path as a source file or build artifact, not an endpoint. */
-    private val sourceExt = listOf(
-        ".dart", ".rs", ".proto", ".kt", ".java", ".swift", ".cc", ".cpp", ".c", ".h",
-        ".go", ".py", ".ts", ".js", ".m", ".mm", ".gradle", ".cmake", ".lock", ".so",
-        ".png", ".svg", ".ttf", ".otf",
-    )
+    private val sourceExt = sourcePathExtensions
 
     /** Last segment values that come from build-time/config strings rather than an API. */
     private val routeJunkTail = setOf("mod", "lib", "build", "main", "index", "src")
@@ -114,7 +149,7 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
     private val dartMarkerMap = linkedMapOf(
         "badCertificateCallback" to "HttpClient accepts invalid TLS certificates",
         "setTrustedCertificates" to "custom trust store installed at runtime",
-    )
+    ).mapValues { (_, desc) -> desc + MARKER_HYPOTHESIS }
 
     /** Proxy schemes only count as a real config when a payload follows. */
     private val proxyRegex = Regex("""\b(vless|vmess|trojan|hysteria2?|tuic|ss|ssr|socks5|wireguard)://[A-Za-z0-9._~+/=-]{2,}""")
@@ -200,7 +235,7 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
         "onReceivedSslError" to "SSL-error handler present (check it does not call proceed())",
         "JavascriptInterface" to "@JavascriptInterface bridge methods present",
         "loadDataWithBaseURL" to "WebView loads content with a base URL",
-    )
+    ).mapValues { (_, desc) -> desc + MARKER_HYPOTHESIS }
 
     fun feed(raw: String, prov: Provenance, layer: Layer) {
         if (raw.length < 6) return
@@ -214,6 +249,10 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             var gated = false
             if (lower != null) {
                 for (g in r.gates) if (lower.contains(g)) { gated = true; break }
+            } else {
+                // Strings >=512 chars have no lowercase copy: scan for the
+                // case-insensitive gates instead of silently skipping them.
+                for (g in r.gates) if (gateHit(raw, g)) { gated = true; break }
             }
             if (!gated) {
                 for (g in r.caseSensitiveGates) if (raw.contains(g)) { gated = true; break }
@@ -225,14 +264,17 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             val value = if (r.group in m.groupValues.indices) m.groupValues[r.group].ifEmpty { m.value } else m.value
             if (value.length < 8) continue
             if (r.accept != null && !r.accept.invoke(raw, value)) continue
-            record(r, value, raw, prov)
+            record(r, value, prov)
         }
 
         // ---- URL / host harvest ----
         if (len < 4096 && (lower == null || raw.contains("://"))) {
             for (m in urlRegex.findAll(raw)) {
                 val url = m.value
-                val host = url.substringAfter("://").substringBefore(':').substringBefore('/')
+                // Authority = everything up to the path; userinfo is stripped so a
+                // credential-shaped userinfo can never masquerade as the host.
+                val authority = url.substringAfter("://").substringBefore('/')
+                val host = authority.substringAfterLast('@').substringBefore(':')
                 if (host.isEmpty() || host.length > 253) continue
                 // A real host has a dot (FQDN, IPv4) or is loopback; bare tokens are
                 // regex debris from concatenated strings like "https://6".
@@ -282,23 +324,30 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
         // AOT release builds keep the same tables inside libapp.so, so both
         // layers feed routes / Dart source paths; debug builds only add kernel.
         if ((layer == Layer.KERNEL || layer == Layer.SO) && len < 1024 &&
-            (routes.size < 60 || dartSources.size < 60) && routePrefilter.containsMatchIn(raw)
+            (routes.size < 60 || dartSources.size < 60)
         ) {
-            for (m in routeRegex.findAll(raw)) {
-                val route = m.value.trimEnd('.', ',', ')', '"', '\'', ';')
-                if (route.length !in 6..80) continue
-                // AOT string tables concatenate neighbours, so ".dart" often has junk after it.
-                val dartAt = route.indexOf(".dart")
-                if (dartAt > 0) {
-                    val src = route.substring(0, dartAt + 5)
-                    if (dartSources.size < 60 && !src.startsWith("/api/lib/")) dartSources.add(src)
-                    continue
+            if (routePrefilter.containsMatchIn(raw)) {
+                for (m in routeRegex.findAll(raw)) {
+                    val route = m.value.trimEnd('.', ',', ')', '"', '\'', ';')
+                    if (route.length !in 6..80) continue
+                    // AOT string tables concatenate neighbours, so ".dart" often has junk after it.
+                    val dartAt = route.indexOf(".dart")
+                    if (dartAt > 0) {
+                        val src = route.substring(0, dartAt + 5)
+                        if (dartSources.size < 60 && !src.startsWith("/api/lib/")) dartSources.add(src)
+                        continue
+                    }
+                    if (route.substringAfterLast('/') in routeJunkTail) continue
+                    if (route.lowercase().let { l -> sourceExt.any { l.endsWith(it) } }) continue
+                    // Binary struct dumps and grpc dumps look like paths but have word-salad segments.
+                    if (route.split('/').any { it.length > 32 || hasUpperRun(it) }) continue
+                    if (routes.size < 60 && !route.startsWith("/api/lib/") && !route.contains("/bus")) routes.add(route)
                 }
-                if (route.substringAfterLast('/') in routeJunkTail) continue
-                if (route.lowercase().let { l -> sourceExt.any { l.endsWith(it) } }) continue
-                // Binary struct dumps and grpc dumps look like paths but have word-salad segments.
-                if (route.split('/').any { it.length > 32 || hasUpperRun(it) }) continue
-                if (routes.size < 60 && !route.startsWith("/api/lib/") && !route.contains("/bus")) routes.add(route)
+            }
+            // Standalone single-segment named routes ("/profile") from Navigator code.
+            if (routes.size < 60 && raw.startsWith("/")) {
+                val t = raw.trim()
+                if (t.length in 2..40 && t.indexOf('/', 1) < 0 && t.substring(1) in standaloneRoutes) routes.add(t)
             }
         }
 
@@ -368,7 +417,8 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
     private fun addSample(host: String, url: String) {
         val l = hostSamples[host] ?: ArrayList<String>(3).also { hostSamples[host] = it }
         if (l.size >= 3 || l.contains(url)) return
-        l.add(if (url.contains('?')) url.substringBefore('?') + "?…" else url.take(120))
+        val safeUrl = url.replace(userInfoRegex, "//")
+        l.add(if (safeUrl.contains('?')) safeUrl.substringBefore('?') + "?…" else safeUrl.take(120))
     }
 
     private fun isNoise(host: String): Boolean {
@@ -406,40 +456,36 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
         )
     }
 
-    private fun record(r: SecretRule, value: String, raw: String, prov: Provenance) {
+    private fun record(r: SecretRule, value: String, prov: Provenance) {
         val key = r.id + "|" + value
         val prior = seen[key]
+        // Dedup is keyed on the raw value, never on the (now masked) snippet.
         if (prior != null) {
             if (prior >= 3) return // cap evidence per unique secret
             seen[key] = prior + 1
-            val idx = findings.indexOfFirst { it.id == r.id && it.evidence.any { e -> e.snippet.contains(value) } }
-            if (idx < 0) return // already capped into another finding; avoid duplicates
+            val idx = findingAt[key] ?: return
             val f = findings[idx]
-            findings[idx] = f.copy(evidence = f.evidence + Evidence(prov.source, prov.offset, contextSnippet(raw, value)))
+            findings[idx] = f.copy(evidence = f.evidence + evidenceFor(r, value, prov))
             return
         }
         seen[key] = 1
+        findingAt[key] = findings.size
         findings.add(
             Finding(
                 id = r.id,
                 title = r.title,
                 severity = r.severity,
-                detail = "Value found in ${prov.source}. Pattern: ${r.id}.",
-                evidence = listOf(Evidence(prov.source, prov.offset, contextSnippet(raw, value))),
+                detail = "Value found in ${prov.source}. Pattern: ${r.id}." + (r.note?.let { " $it" } ?: ""),
+                evidence = listOf(evidenceFor(r, value, prov)),
                 remediation = r.remediation,
                 masvs = r.masvs,
-            )
+            ),
         )
     }
 
-    private fun contextSnippet(raw: String, value: String): String {
-        val idx = raw.indexOf(value)
-        val start = maxOf(0, idx - 24)
-        val end = minOf(raw.length, idx + value.length + 16)
-        var s = raw.substring(start, end).replace('\n', ' ').replace('\r', ' ')
-        if (s.length > 120) s = s.take(120)
-        return s
-    }
+    /** Sensitive rules mask the value by construction; public identifiers stay visible. */
+    private fun evidenceFor(r: SecretRule, value: String, prov: Provenance): Evidence =
+        Evidence(prov.source, prov.offset, if (r.secret) Evidence.mask(value) else value, value)
 
     private fun buildRules(): List<SecretRule> = listOf(
         SecretRule(
@@ -538,6 +584,8 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
                 raw.contains("Envied") || raw.contains("varName") ||
                     raw.contains("fromEnvironment") || raw.contains("getEnvironment")
             },
+            secret = false,
+            note = "The variable name (not its value) is matched: public by design, hypothesis only.",
             remediation = "dart-define values are plaintext in the Dart snapshot; treat them as public. Secrets belong on the server.",
             masvs = listOf("MASVS-CODE-1"),
         ),
@@ -549,9 +597,27 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             masvs = listOf("MASVS-CODE-1"),
         ),
         SecretRule(
+            "SEC-KEY-SUPABASE-SECRET", "Supabase secret (service_role) key embedded", Severity.CRITICAL,
+            gates = listOf("sb_secret_"), caseSensitiveGates = listOf("sb_secret_"),
+            regex = Regex("""\bsb_secret_[A-Za-z0-9_-]{16,}\b"""),
+            remediation = "Rotate the key in the Supabase dashboard; service_role keys bypass RLS and must never ship in a client.",
+            masvs = listOf("MASVS-CODE-1"),
+        ),
+        SecretRule(
+            "SEC-SUPABASE-PUBLISHABLE", "Supabase publishable (anon) key embedded", Severity.INFO,
+            gates = listOf("sb_publishable_"), caseSensitiveGates = listOf("sb_publishable_"),
+            regex = Regex("""\bsb_publishable_[A-Za-z0-9_-]{16,}\b"""),
+            secret = false,
+            note = "Public identifier by design: hypothesis only, not confirmed exploitation.",
+            remediation = "Publishable keys are safe to embed; verify RLS is enabled on every exposed table.",
+            masvs = listOf("MASVS-CONFIG"),
+        ),
+        SecretRule(
             "SEC-KEY-OAUTH-CLIENT", "Google OAuth client id exposed", Severity.LOW,
             gates = listOf(".apps.googleusercontent.com"),
             regex = Regex("""\b\d{8,}-[0-9a-z]+\.apps\.googleusercontent\.com\b"""),
+            secret = false,
+            note = "Public identifier by design: hypothesis only, not confirmed exploitation.",
             remediation = "Client IDs are public by design; verify redirect URIs are locked down.",
             masvs = listOf("MASVS-CODE-1"),
         ),
@@ -560,6 +626,8 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             gates = listOf("firebasestorage.app", "firebaseio.com", ":android:", "gcm_defaultsenderid"),
             regex = Regex("""([a-z0-9\-]{3,}\.firebasestorage\.app|[a-z0-9\-]{3,}\.firebaseio\.com|1:\d{6,}:(?:android|web):[0-9a-f]{8,})"""),
             accept = { _, v -> !v.contains("my-awesome-app") && !v.contains("your-") },
+            secret = false,
+            note = "Public identifier by design: hypothesis only, not confirmed exploitation.",
             remediation = "Firebase IDs/keys are public by design; enforce Security Rules, App Check and API-key restrictions.",
             masvs = listOf("MASVS-CONFIG"),
         ),
@@ -597,6 +665,8 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             "SEC-SENTRY-DSN", "Sentry DSN found", Severity.LOW,
             gates = listOf("sentry", "ingest."),
             regex = Regex("""https://[0-9a-f]{32}@[a-z0-9.\-]+/\d+"""),
+            secret = false,
+            note = "Public identifier by design: hypothesis only, not confirmed exploitation.",
             remediation = "DSNs are client-side identifiers; acceptable if event quotas and PII scrubbing are configured.",
             masvs = listOf("MASVS-CODE-1"),
         ),
@@ -604,6 +674,8 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             "SEC-MAPBOX", "Mapbox access token", Severity.LOW,
             gates = listOf("pk.ey"), caseSensitiveGates = listOf("pk.ey"),
             regex = Regex("""\bpk\.ey[A-Za-z0-9_\-=.]{20,}\b"""),
+            secret = false,
+            note = "Public identifier by design: hypothesis only, not confirmed exploitation.",
             remediation = "Public tokens should be URL-restricted in the Mapbox dashboard.",
             masvs = listOf("MASVS-CODE-1"),
         ),
@@ -611,6 +683,8 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             "SEC-REVENUECAT", "RevenueCat SDK key", Severity.LOW,
             gates = listOf("appl_", "goog_", "rc_"),
             regex = Regex("""\b(?:appl|goog|rc)_[A-Za-z0-9]{16,}\b"""),
+            secret = false,
+            note = "Public identifier by design: hypothesis only, not confirmed exploitation.",
             remediation = "RevenueCat public SDK keys are designed to be embedded; no action unless it is a secret API key.",
             masvs = listOf("MASVS-CODE-1"),
         ),
@@ -618,6 +692,8 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             "SEC-SUPABASE", "Supabase project URL", Severity.INFO,
             gates = listOf(".supabase.co"),
             regex = Regex("""https://[a-z0-9\-]{3,}\.supabase\.co\b"""),
+            secret = false,
+            note = "Public identifier by design: hypothesis only, not confirmed exploitation.",
             remediation = "Supabase URLs are public; check that RLS policies are enabled on all tables.",
             masvs = listOf("MASVS-CODE-1"),
         ),

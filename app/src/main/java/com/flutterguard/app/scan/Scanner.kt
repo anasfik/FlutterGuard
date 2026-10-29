@@ -22,6 +22,9 @@ import kotlinx.coroutines.withContext
 import java.security.DigestInputStream
 import java.security.MessageDigest
 
+/** Thrown by [Scanner.scan] at a cancellation checkpoint after a cancel request. */
+class ScanCancelledException : Exception("Scan cancelled")
+
 /** End-to-end static audit of one installed application. */
 object Scanner {
 
@@ -50,29 +53,45 @@ object Scanner {
      */
     private val dartVersionLine = Regex("""\d+\.\d+\.\d+ \((?:stable|beta|dev)\) \(.*\) on "[a-z0-9_]+""")
 
+    /**
+     * [isCancelled] is polled at every named stage and inside the long
+     * synchronous string loops, so cancellation does not wait for the scan to
+     * finish. It throws [ScanCancelledException]; no partial report is produced.
+     */
     suspend fun scan(
         context: Context,
         app: InstalledApp,
         onProgress: (step: String, pct: Int) -> Unit,
+        isCancelled: () -> Boolean = { false },
     ): Report = withContext(Dispatchers.IO) {
         val started = System.currentTimeMillis()
         val pm = context.packageManager
 
-        onProgress("Reading package info", 2)
+        fun check() {
+            if (isCancelled()) throw ScanCancelledException()
+        }
+        fun stage(step: String, pct: Int) {
+            check()
+            onProgress(step, pct)
+        }
+
+        stage("Reading package info", 2)
         var flags = PackageManager.GET_ACTIVITIES or PackageManager.GET_SERVICES or
             PackageManager.GET_RECEIVERS or PackageManager.GET_PROVIDERS or PackageManager.GET_PERMISSIONS
         if (Build.VERSION.SDK_INT >= 28) flags = flags or PackageManager.GET_SIGNING_CERTIFICATES
         val pi = pm.getPackageInfo(app.packageName, flags)
 
-        onProgress("Opening APK artifacts", 6)
-        val ai = app.applicationInfo
+        stage("Opening APK artifacts", 6)
+        // Resolved at scan time: the cached InstalledApp carries no platform object,
+        // and a package removed since discovery fails here visibly.
+        val ai = pm.getApplicationInfo(app.packageName, 0)
         val source = ApkSource.forApplication(ai)
         source.use { src ->
             val zipNames = src.names()
             val findings = ArrayList<Finding>()
 
             // ---------- manifest ----------
-            onProgress("Decoding AndroidManifest", 10)
+            stage("Decoding AndroidManifest", 10)
             val manifest = src.bytes("AndroidManifest.xml")?.let { AxmlDecoder.decode(it) }
             val targetSdk = ai.targetSdkVersion.takeIf { it > 0 }
             val (manifestFindings, facts) = if (manifest != null) {
@@ -99,7 +118,7 @@ object Scanner {
             }.getOrNull()
 
             // ---------- resources ----------
-            onProgress("Scanning resource strings", 20)
+            stage("Scanning resource strings", 20)
             val scanner = SecretScanner(appTokens(app.packageName, app.label))
             val dexPrefixHits = LinkedHashMap<String, MutableSet<String>>()
             src.bytes("resources.arsc")?.let { arsc ->
@@ -107,7 +126,7 @@ object Scanner {
             }
 
             // ---------- res/xml (network security config etc.) ----------
-            onProgress("Decoding res/xml", 26)
+            stage("Decoding res/xml", 26)
             // Resource names are often flattened to res/xx.xml by R8, so match any res/*.xml
             // and identify the config by its root element rather than by filename.
             val resXml = ArrayList<Pair<String, AxmlNode>>()
@@ -121,18 +140,22 @@ object Scanner {
             val nsc = (nscCandidates.firstOrNull { it.second.children.isNotEmpty() } ?: nscCandidates.firstOrNull())?.second
 
             // ---------- DEX ----------
-            onProgress("Extracting DEX strings", 34)
+            stage("Extracting DEX strings", 34)
             val dexNames = zipNames.filter { Regex("""^classes\d*\.dex$""").matches(it) }.sorted()
             for (name in dexNames) {
+                check()
                 val bytes = src.bytes(name, maxBytes = 96 * 1024 * 1024) ?: continue
+                var dexStrings = 0
                 DexStrings.forEach(bytes, name) { s, srcName, off ->
+                    // Bounded checkpoint inside the synchronous string loop.
+                    if ((++dexStrings and 0x3FFF) == 0) check()
                     scanner.feed(s, Provenance(srcName, off), Layer.DEX)
                     ThirdPartyRules.checkDexString(s, dexPrefixHits)
                 }
             }
 
             // ---------- native libs ----------
-            onProgress("Analyzing native libraries", 55)
+            stage("Analyzing native libraries", 55)
             val primaryAbi = abis.firstOrNull { it == "arm64-v8a" } ?: abis.firstOrNull()
             val nativeLibs = ArrayList<NativeLib>()
             var engineVersionString: String? = null
@@ -146,6 +169,7 @@ object Scanner {
             if (primaryAbi != null) {
                 val libEntries = zipNames.filter { it.startsWith("lib/$primaryAbi/") && it.endsWith(".so") }.sorted()
                 for (libPath in libEntries) {
+                    check()
                     val base = libPath.substringAfterLast('/')
                     val entry = src.entry(libPath) ?: continue
                     val markers = ArrayList<String>()
@@ -157,6 +181,7 @@ object Scanner {
                     DigestInputStream(stream, MessageDigest.getInstance("SHA-256")).use { dis ->
                         var soStringsCount = 0
                         SoStrings.forEach(dis, capBytes) { s, off ->
+                            if ((soStringsCount and 0xFFFF) == 0) check()
                             if (base == "libapp.so") {
                                 if (s.startsWith("package:")) packageUriCount++
                                 if (s.length in 8..60 && s.contains(Regex("""^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+$"""))) camelCount++
@@ -198,7 +223,7 @@ object Scanner {
             // Debug Flutter builds ship the Dart kernel (near-source) instead of
             // libapp.so. That blob is the richest evidence source on-device, so it
             // gets a full string sweep — this is what makes a debug APK readable.
-            onProgress("Scanning Dart kernel", 60)
+            stage("Scanning Dart kernel", 60)
             var kernelBlobBytes: Long? = null
             var snapshotBytes: Long? = null
             val kernelFiles = ArrayList<String>()
@@ -209,13 +234,16 @@ object Scanner {
                 flutterAssetPrefix + "vm_snapshot_data",
             )
             for (name in kernelEntries) {
+                check()
                 val e = src.entry(name) ?: continue
                 val size = e.second.size
                 if (name.endsWith("kernel_blob.bin")) kernelBlobBytes = size
                 else snapshotBytes = (snapshotBytes ?: 0L) + size
                 val stream = src.stream(name) ?: continue
                 stream.use { ins ->
+                    var kernelStrings = 0
                     SoStrings.forEach(ins, 256L * 1024 * 1024) { s, off ->
+                        if ((++kernelStrings and 0xFFFF) == 0) check()
                         if (s.startsWith("package:") && s.endsWith(".dart") && kernelFiles.size < 14) {
                             kernelFiles.add(s.take(110))
                         }
@@ -247,16 +275,16 @@ object Scanner {
             )
 
             // ---------- assets ----------
-            onProgress("Kernel strings scanned (${scanner.kernelStrings})", 66)
-            onProgress("Scanning assets", 72)
-            scanAssets(src, zipNames, scanner, findings)
+            stage("Kernel strings scanned (${scanner.kernelStrings})", 66)
+            stage("Scanning assets", 72)
+            scanAssets(src, zipNames, scanner, findings, ::check)
 
             // ---------- rule sets that consume aggregates ----------
-            onProgress("Evaluating network security", 80)
+            stage("Evaluating network security", 80)
             val nscDeclared = manifest?.children("application")?.firstOrNull()?.attr("networkSecurityConfig") != null
             findings += NetworkRules.evaluate(nsc, facts.usesCleartextTraffic, targetSdk ?: facts.targetSdkAttr, scanner.httpHosts, nscDeclared)
 
-            onProgress("Verifying signing", 85)
+            stage("Verifying signing", 85)
             val (signing, sigFindings) = SigningRules.evaluate(pi, ai.publicSourceDir ?: "", zipNames)
             findings += sigFindings
 
@@ -387,7 +415,7 @@ object Scanner {
             findings += scanner.toFindingList()
 
             // ---------- assemble ----------
-            onProgress("Composing report", 95)
+            stage("Composing report", 95)
             val all = findings.sortedBy { it.severity }
             val counts = Severity.entries.associateWith { s -> all.count { it.severity == s } }
             val meta = AppMeta(
@@ -417,6 +445,17 @@ object Scanner {
                 durationMs = System.currentTimeMillis() - started,
             )
             val grade = gradeOf(stats.critical, stats.high, stats.medium, stats.low)
+            // Notable artifact rows only: the full inventory is browsable live
+            // through ApkSource; the report carries a bounded, deterministic subset.
+            val notableCategories = setOf(
+                ArtifactCategory.MANIFEST, ArtifactCategory.DEX, ArtifactCategory.NATIVE_LIB,
+                ArtifactCategory.KERNEL, ArtifactCategory.CONFIG, ArtifactCategory.KEY_MATERIAL,
+                ArtifactCategory.SIGNING,
+            )
+            val notableArtifacts = runCatching { src.artifactEntries() }.getOrDefault(emptyList())
+                .filter { it.category in notableCategories }
+                .sortedWith(compareBy<ArtifactEntry> { it.category.ordinal }.thenBy { it.name })
+                .take(256)
             val report = Report(
                 meta, framework, signing, all,
                 scanner.hostInfos(),
@@ -424,8 +463,9 @@ object Scanner {
                 thirdParty, facts.permissionHits, facts.deepLinks, stats, grade,
                 routes = scanner.routes.toList(),
                 dartSources = scanner.dartSources.toList(),
-            )
-            onProgress("Done", 100)
+                artifacts = notableArtifacts,
+            ).let { r -> r.scrubSecrets(r.secretValues()) }
+            stage("Done", 100)
             report
         }
     }
@@ -441,13 +481,20 @@ object Scanner {
             .filter { it.length >= 4 && it !in tokenStopWords }
             .toSet()
 
-    private fun scanAssets(src: ApkSource, zipNames: Set<String>, scanner: SecretScanner, findings: MutableList<Finding>) {
+    private fun scanAssets(
+        src: ApkSource,
+        zipNames: Set<String>,
+        scanner: SecretScanner,
+        findings: MutableList<Finding>,
+        check: () -> Unit,
+    ) {
         val interesting = listOf(
             ".env" to Severity.HIGH, "google-services.json" to Severity.MEDIUM,
             "secrets" to Severity.MEDIUM, "credentials" to Severity.MEDIUM,
         )
         var endpointHits = 0
         for (name in zipNames) {
+            check()
             // Root-level config files (firebase-*.properties, *.json, *.cfg) are
             // just as readable as assets/ and routinely carry project ids and keys.
             val rootConfig = !name.contains('/') &&
@@ -499,7 +546,7 @@ object Scanner {
                             p.optString("project_id", "").takeIf { it.isNotEmpty() }?.let { fields.add("project_id=$it") }
                             p.optString("storage_bucket", "").takeIf { it.isNotEmpty() }?.let { fields.add("bucket=$it") }
                         }
-                        json.optJSONArray("client")?.optJSONObject(0)?.optJSONObject("api_key")?.optJSONArray("current_key")?.optString(0)?.takeIf { it.isNotEmpty() }?.let { fields.add("api_key=${Evidence.redact(it)}") }
+                        json.optJSONArray("client")?.optJSONObject(0)?.optJSONObject("api_key")?.optJSONArray("current_key")?.optString(0)?.takeIf { it.isNotEmpty() }?.let { fields.add("api_key=${Evidence.mask(it)}") }
                     }
                 }
                 if (fields.isNotEmpty()) detail += " (${fields.joinToString()})"
@@ -540,7 +587,9 @@ object Scanner {
                                 (if (live) " in a production/live profile" else "") +
                                 ". Extracted: " + creds.map { it.name }.joinToString()
                             else ". No credential-shaped names, but endpoints and flags are public.",
-                        evidence = creds.take(12).map { Evidence(name, 0, it.name + "=" + Evidence.redact(it.value)) },
+                        evidence = creds.take(12).map {
+                            Evidence(name, 0, it.name + "=" + Evidence.mask(it.value), it.value)
+                        },
                         remediation = "Ship only public configuration in the app; keep client secrets server-side and inject them at runtime.",
                         masvs = listOf("MASVS-CRYPTO-1", "MASVS-CONFIG"),
                     )
