@@ -697,7 +697,7 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
             remediation = "Supabase URLs are public; check that RLS policies are enabled on all tables.",
             masvs = listOf("MASVS-CODE-1"),
         ),
-    )
+    ) + ProviderSecrets.rules
 
     fun toFindingList(): List<Finding> = findings.toList()
 }

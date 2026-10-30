@@ -72,6 +72,27 @@ MethodChannel inventory split into `app` / `plugin` / `standard`.
 
 **Native surface** — `flutter_rust_bridge` and other FFI bridges, JNI `Java_*` entry point count.
 
+**Third-party and AI surface** — the SDK fingerprint table covers ~135 services, each matched by
+zip path, DEX descriptor, pub package or host: everything from Firebase, Play Services, billing,
+ads and attribution to auth (Auth0, Clerk, Appwrite, Stytch, WorkOS), realtime (Agora, LiveKit,
+Stream, Sendbird), payments (Stripe, RevenueCat, PayPal, Paddle), backends (PocketBase, Nhost,
+Supabase) and vector stores. Large language model providers are inventoried individually —
+OpenAI, Anthropic, Gemini, Groq, Mistral, Cohere, DeepSeek, OpenRouter, Together, Fireworks,
+Perplexity, xAI, HuggingFace, Replicate, Bedrock, DashScope, Moonshot, GLM, MiniMax, ElevenLabs,
+Stability — plus on-device runtimes signalled by `localhost:11434` (Ollama) and `localhost:1234`
+(LM Studio) and ComfyUI's `:8188`. The same pass names the ad, analytics and crash SDKs an app
+ships, which is usually the most surprising part of a report.
+
+**SDK marker files and bundled config** — root-level `billing.properties`,
+`play-services-*.properties`, `transport-*.properties` and `firebase-encoders*.properties` name the
+SDK they prove without parsing DEX; bundled `.env`/`.json`/`.yaml`/`.properties`/`.sqlite` and
+key material are listed as config surface; bundled HTML/JS pages are reported as a WebView payload
+so a local page rendered with a JS bridge is visible rather than implied.
+
+**Exact versions when the APK still has its `pubspec.yaml`** — some release builds keep the
+project's own dependency manifest, which yields real names *and* constraints instead of recovered
+candidates. When it is absent the candidate list from `NOTICES.Z` and `package:` URIs is used.
+
 ## Install
 
 Download the signed APK from [Releases](https://github.com/anasfik/flutterguard/releases) and

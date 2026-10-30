@@ -9,7 +9,9 @@ import com.flutterguard.app.scan.parsers.ArscReader
 import com.flutterguard.app.scan.parsers.DexStrings
 import com.flutterguard.app.scan.parsers.DotEnv
 import com.flutterguard.app.scan.parsers.Notices
+import com.flutterguard.app.scan.parsers.Pubspec
 import com.flutterguard.app.scan.parsers.SoStrings
+import com.flutterguard.app.scan.rules.AssetInventory
 import com.flutterguard.app.scan.rules.FlutterRules
 import com.flutterguard.app.scan.rules.Layer
 import com.flutterguard.app.scan.rules.ManifestRules
@@ -274,10 +276,87 @@ object Scanner {
                 masvs = listOf("MASVS-RESILIENCE-1"),
             )
 
+            // ---------- exact dependency versions from pubspec.yaml ----------
+            // Release APKs ship the project's pubspec verbatim, so the dependency
+            // list is not a guess: names *and* constraints. NOTICES.Z cannot do this.
+            src.bytes(flutterAssetPrefix + "pubspec.yaml", 2 * 1024 * 1024)?.let { raw ->
+                val info = Pubspec.parse(String(raw, Charsets.UTF_8))
+                if (!info.isEmpty) {
+                    val shown = info.deps.entries.take(40)
+                    findings += Finding(
+                        id = "FLUT-PUBSPEC",
+                        title = "Exact dependency versions recovered from pubspec.yaml (${info.deps.size})",
+                        severity = Severity.INFO,
+                        detail = buildString {
+                            append("The APK still contains the project's pubspec (")
+                            append(info.name ?: "unnamed")
+                            info.version?.let { append(' ').append(it) }
+                            append(") with exact version constraints, so the third-party stack and the ")
+                            append("CVEs that apply to it are identifiable without decompiling.\n")
+                            append(shown.joinToString("\n") { (k, v) -> "$k: $v" })
+                        },
+                        evidence = shown.take(8).map { (k, v) ->
+                            Evidence(flutterAssetPrefix + "pubspec.yaml", 0, "$k: $v")
+                        },
+                        remediation = "Pin and patch dependencies; assume the dependency list is public.",
+                        masvs = listOf("MASVS-RESILIENCE-1", "MASVS-CODE-3"),
+                    )
+                }
+            }
+
             // ---------- assets ----------
             stage("Kernel strings scanned (${scanner.kernelStrings})", 66)
             stage("Scanning assets", 72)
             scanAssets(src, zipNames, scanner, findings, ::check)
+
+            // ---------- name-only inventory: web payloads, config files, SDK markers ----------
+            // Nothing is read here, so no content can leak; these are structural facts
+            // about what the APK ships, which is exactly what a researcher needs first.
+            val inventory = AssetInventory.evaluate(zipNames)
+            if (inventory.webPayloads.isNotEmpty()) {
+                findings += Finding(
+                    id = "WEB-PAYLOAD",
+                    title = "Bundled web payload (${inventory.webPayloads.size} page(s), ${inventory.scriptCount} script(s))",
+                    severity = Severity.INFO,
+                    detail = buildString {
+                        append("The APK ships its own HTML/JS, so a WebView renders local content ")
+                        append("with whatever bridge the app exposes. Review the bridge markers above ")
+                        append("together with these pages.\n")
+                        append(inventory.webPayloads.take(20).joinToString("\n"))
+                        if (inventory.webPayloads.size > 20) append("\n…")
+                    },
+                    evidence = inventory.webPayloads.take(8).map { Evidence(it, 0, it) },
+                    remediation = "Serve remote content over TLS where possible; expose no JS interface to local pages that can be replaced.",
+                    masvs = listOf("MASVS-PLATFORM-1"),
+                )
+            }
+            if (inventory.sdkMarkers.isNotEmpty()) {
+                findings += Finding(
+                    id = "SDK-MARKER",
+                    title = "SDK marker files (${inventory.sdkMarkers.size})",
+                    severity = Severity.INFO,
+                    detail = inventory.sdkMarkers.entries.joinToString("\n") { (sdk, files) ->
+                        "$sdk: ${files.joinToString(", ")}"
+                    },
+                    evidence = inventory.sdkMarkers.entries.flatMap { (sdk, files) ->
+                        files.map { Evidence(it, 0, sdk) }
+                    }.take(8),
+                    remediation = "Confirms the bundled SDK set; keep those SDKs patched.",
+                    masvs = listOf("MASVS-RESILIENCE-3"),
+                )
+            }
+            if (inventory.configFiles.isNotEmpty()) {
+                findings += Finding(
+                    id = "AST-CONFIG",
+                    title = "Bundled config/secret-bearing files (${inventory.configFiles.size})",
+                    severity = Severity.INFO,
+                    detail = "Files that commonly carry endpoints, keys or database content:\n" +
+                        inventory.configFiles.take(25).joinToString("\n"),
+                    evidence = inventory.configFiles.take(8).map { Evidence(it, 0, it) },
+                    remediation = "Ship no development config; keep credentials out of anything under assets/.",
+                    masvs = listOf("MASVS-STORAGE-1"),
+                )
+            }
 
             // ---------- rule sets that consume aggregates ----------
             stage("Evaluating network security", 80)

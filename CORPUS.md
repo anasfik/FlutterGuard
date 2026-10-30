@@ -177,3 +177,96 @@ adb pull /sdcard/Android/data/com.flutterguard.app/files/reports/com_gopeed_gope
 Note for future fetches: the latest release assets of FlClash, PiliPlus,
 miru-app, JHenTai, pikapika, kelivo and Mangayomi are **x86_64-only** and cannot
 be installed on an arm64 phone; pick the arm64 asset when they publish one.
+
+## Gap study: what the 26 release APKs carry that FlutterGuard missed
+
+Method, so the numbers can be re-derived rather than trusted:
+
+```bash
+# 1. extract every APK once
+for f in ~/Downloads/.fgcorpus2/*.apk ~/Downloads/.fgcorpus/*.apk; do
+  d=/tmp/opencode/corpus-x/$(basename "$f" .apk); mkdir -p "$d"; unzip -qo "$f" -d "$d"; done
+
+# 2. provider hosts — FIXED STRINGS, never a regex file.
+#    `rg -f` with counted repetitions (`sk-[A-Za-z0-9]{48}`) is ~85x slower:
+#    74s for one 2.5MB classes.dex versus 0.87s for the whole 121MB app as -F.
+rg -F -a -o --no-filename -N -f hosts.txt <app-dir> | sort -u
+
+# 3. third-party SDKs live as DEX type descriptors, not as readable strings
+rg -a -o --no-filename -N 'L(?:com|io|org|net|dev|app|me|co)/[a-z0-9_$]{2,30}(?:/[a-z0-9_$]{2,30}){0,2}' \
+  <app-dir>/classes*.dex | sed 's|^L||' | sort | uniq -c | sort -rn
+```
+
+### Measured result — AI providers
+
+`hosts.txt` held 109 literal provider hosts. **9 of 26 apps matched at least one**, and
+the distribution is the argument for per-provider rules instead of one lumped "LLM" entry:
+
+| App | Provider endpoints found |
+|---|---|
+| Conduit (`app.cogwheel.conduit`) | **22** — anthropic, cerebras, cohere, deepinfra, deepseek, fireworks, groq, mistral, moonshot, novita, openai, perplexity, poe, together, x.ai, volces (ark), dashscope, gemini, huggingface, openrouter, open.bigmodel, here |
+| Anx Reader | 5 — anthropic, deepseek, openai, gemini, openrouter |
+| OpenNutriTracker | 3 — anthropic, openai, openrouter |
+| AppFlowy | `localhost:11434` **and** `localhost:1234` |
+| Echo-Loop | huggingface, posthog, supabase |
+| BeeCount | open.bigmodel, supabase |
+| namida, primal, authpass | supabase / elastic, here / iterable |
+
+Before this study the only related detector was a single `OpenAI/LLM` service with three
+hosts and four pub packages, so Anthropic, Gemini, DeepSeek, OpenRouter, Groq, xAI and the
+on-device Ollama/LM Studio endpoints in AppFlowy were all invisible.
+
+`localhost:11434` and `localhost:1234` are the interesting ones: they are not third-party
+calls at all, they are a phone talking to an LLM running on the same device or on the LAN.
+A finding that says "this app can talk to a local model" is only deliverable if the rule
+table contains those ports literally, which is why they are host entries rather than a
+generic "AI SDK" guess.
+
+### Measured result — third-party SDKs
+
+The 82 DEX prefixes extracted from the rule table were swept as fixed strings over every
+`classes*.dex`. **22 of 26 apps matched at least one.** Prefix → number of apps:
+
+`com/google/android/gms` 11 · `com/pichillilorenzo/flutter_inappwebview` 10 ·
+`androidx/media3` 10 · `androidx/work` 8 · `com/google/firebase` 5 ·
+`io/flutter/plugins/firebase` 4 · `com/android/billingclient` 4 · `androidx/biometric` 3 ·
+`com/google/mlkit` 2 · `io/sentry`, `io/grpc`, `com/revenuecat`, `com/posthog`,
+`com/google/android/play/core/integrity`, `com/google/android/exoplayer2` 1 each.
+
+**Every other prefix matched nothing in this corpus** — ad networks, attribution, auth
+providers, realtime SDKs, payment SDKs, backend SDKs and vector stores. They are shipped
+as coverage for apps that are not in this corpus, not as demonstrated detections. Do not
+quote them as findings about these 26 apps.
+
+### Measured result — pubspec and config files
+
+`assets/flutter_assets/pubspec.yaml` exists in **1 of 26** apps (Anx Reader: `anx_reader`
+`1.14.0+6321`, 92 dependencies with constraints). It is a bonus signal, not a replacement
+for `NOTICES.Z` and `package:` URIs — most release builds strip it.
+
+Cheap filename-only signals that do work across the corpus: root `billing.properties`,
+`play-services-{base,basement,tasks,location,places-placereport}.properties`,
+`transport-{api,backend-cct,runtime}.properties`, `firebase-encoders{,-json,-proto}.properties`.
+Anx Reader additionally bundles a full web payload under
+`assets/flutter_assets/assets/foliate-js/` (`index.html`, `epub.js`, prism bundles) plus
+`flutter_inappwebview`'s `web_support.js` and a `trix` runner page — a local WebView
+surface that no host-based rule can see.
+
+### What this study added to the detectors
+
+- `rules/ProviderSecrets.kt` — 25 rules for credentials the corpus showed in use:
+  Anthropic, OpenAI project keys, Groq, HuggingFace, Replicate, OpenRouter, xAI, Fireworks,
+  Postmark, Mailgun, Azure Storage `AccountKey`, GCP service-account JSON, DigitalOcean,
+  GitHub PAT, GitLab, npm, Docker, Postman, Airtable, Notion, Linear, Slack and Discord
+  webhooks, bearer JWTs, AES/ECB usage.
+- `rules/ThirdPartyRules.kt` — 35 services became ~135: per-provider LLM entries, ad
+  networks, attribution, auth providers, realtime, payments, backends, vector/search,
+  on-device HTTP servers (`shelf`, `dart_frog`), local storage and media stacks.
+- `rules/AssetInventory.kt` — filename-only inventory: bundled HTML/JS as a WebView
+  payload, root `.properties` SDK markers, and config/secret-bearing files (`.env`,
+  `.json`, `.yaml`, `.sqlite`, key material) excluding `res/`, `META-INF/` and fonts.
+- `parsers/Pubspec.kt` — exact dependency names and constraints when the pubspec ships.
+
+All of it is static, offline and evidence-only: a matched host proves the string is in
+the APK, not that the app calls it; a matched key is a key-shaped string, not a verified
+credential.
