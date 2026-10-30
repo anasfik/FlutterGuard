@@ -361,6 +361,8 @@ object ScanQueueRunner {
 
     /** Background-safe completion; silently skipped when notifications are not permitted. */
     private fun notifyFinished(context: Context, state: ScanQueueState, requested: Int) {
+        // The Settings toggle is the user's answer for the whole app, queue included.
+        if (!com.flutterguard.app.settings.Settings.snapshot(context).notifications) return
         runCatching {
             if (Build.VERSION.SDK_INT >= 26) {
                 val nm = context.getSystemService(NotificationManager::class.java)

@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.flutterguard.app.scan.ReportFiles
 import com.flutterguard.app.scan.ScanStore
+import java.io.File
 import com.flutterguard.app.settings.ConsentPolicy
 import com.flutterguard.app.settings.SettingsState
 import kotlinx.coroutines.Dispatchers
@@ -242,7 +243,7 @@ internal fun SettingsScreen(
             title = { Text("Delete all reports?") },
             text = {
                 Text(
-                    "This deletes every report, history log and in-flight marker in ${ReportFiles.appDir(context).absolutePath}. It cannot be undone, and exported files you already shared elsewhere are not affected.",
+                    "This deletes every report, history log, in-flight marker and cached export copy. It cannot be undone, and copies you already shared with another app are not affected.",
                 )
             },
             confirmButton = {
@@ -250,9 +251,18 @@ internal fun SettingsScreen(
                     confirmDelete = false
                     scope.launch {
                         val removed = withContext(Dispatchers.IO) {
-                            ReportFiles.deleteAll(ReportFiles.appDir(context))
+                            val reports = ReportFiles.deleteAll(ReportFiles.appDir(context))
+                            // A sensitive export is written to cache/exports before it is
+                            // shared; deleting reports must not leave those raw values behind.
+                            val exports = File(context.cacheDir, "exports")
+                            val shared = exports.listFiles()?.size ?: 0
+                            exports.deleteRecursively()
+                            reports + shared
                         }
-                        ScanStore.reset()
+                        // reset() is a test hook that nulls the executing job, which would
+                        // admit a second scanner and let the live scan write its report back
+                        // after this delete. Never touch a running scan from here.
+                        if (!ScanStore.isExecuting()) ScanStore.reset()
                         Toast.makeText(
                             context,
                             if (removed == 0) "No stored reports to delete." else "Deleted $removed stored file(s).",

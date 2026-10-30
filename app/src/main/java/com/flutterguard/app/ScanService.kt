@@ -48,6 +48,13 @@ class ScanService : Service() {
      * permanent, so a retry can never revive an old synchronous scanner.
      */
     private var activeToken: ScanToken? = null
+
+    /**
+     * The cache copy of a picked/shared APK. `execute` deletes it in `finally`,
+     * but a launch cancelled before the body runs never reaches that, and
+     * `onDestroy` is the only place left that can drop it.
+     */
+    private var activeFile: java.io.File? = null
     private var headless = false
     private var foregroundStarted = false
     private var lastNotificationKey: String? = null
@@ -100,9 +107,12 @@ class ScanService : Service() {
         // even one whose job already failed (timeout/cancel): no overlap, no hiding.
         val job = ScanStore.start(packageName)
         if (job == null) {
+            // No job will own this cache copy, so nothing else would ever delete it.
+            file?.let { runCatching { it.delete() } }
             refuseScan(packageName, "a scan is already running or still stopping")
             return
         }
+        if (file != null) activeFile = file
         val token = ScanToken(job.id)
         this.headless = headless
         activeId = job.id
@@ -219,6 +229,7 @@ class ScanService : Service() {
             if (!token.isAbandoned) ReportFiles.clearInflight(dir, packageName)
             // The cache copy exists only for this job; an abandoned job also drops it.
             if (file != null) runCatching { file.delete() }
+            if (activeFile === file) activeFile = null
             if (activeId == job.id && activeToken === token) {
                 activeId = -1L
                 activeToken = null
@@ -286,6 +297,9 @@ class ScanService : Service() {
         }
         work?.cancel()
         work = null
+        // A launch killed before its body ran never reached execute()'s cleanup.
+        activeFile?.let { runCatching { it.delete() } }
+        activeFile = null
         activeId = -1L
         activeToken = null
         super.onDestroy()

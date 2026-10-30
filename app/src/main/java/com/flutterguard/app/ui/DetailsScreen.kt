@@ -823,7 +823,9 @@ private fun ExploreSection(
     var depQuery by rememberSaveable(report.meta.packageName) { mutableStateOf("") }
     var previewEntry by remember(report.meta.packageName) { mutableStateOf<ArtifactEntry?>(null) }
 
-    val artifacts = rememberArtifactSource(report.meta.packageName)
+    // A file scan has no installed app to read: resolving the package name through
+    // PackageManager would show a *different* artifact than the report describes.
+    val artifacts = rememberArtifactSource(report.meta.packageName, enabled = !report.meta.fileScan)
     val source = artifacts.source
     val entries = artifacts.entries
 
@@ -1555,7 +1557,7 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                     exporting = true
                     val sections = choice.sections
                     val ext = choice.extension
-                    val sensitive = choice.sensitive && sensitiveAllowed
+                    val sensitive = settings.exportSensitive(choice.sensitive)
                     exportJob = scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             runCatching { ReportExport.writeFile(context, report, ext, sections, sensitive) }

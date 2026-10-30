@@ -76,7 +76,7 @@ class MainActivity : ComponentActivity() {
             finish()
             return
         }
-        sharedApk = sharedApkUri(intent)
+        sharedApk = consumeSharedApk(intent)
         Settings.load(this)
         notificationsAllowed = NotificationManagerCompat.from(this).areNotificationsEnabled()
         if (Settings.snapshot(this).notifications) askForNotificationPermission()
@@ -101,7 +101,20 @@ class MainActivity : ComponentActivity() {
             finish()
             return
         }
-        sharedApkUri(intent)?.let { sharedApk = it }
+        consumeSharedApk(intent)?.let { sharedApk = it }
+    }
+
+    /**
+     * Reads a shared APK and strips it from the intent.
+     *
+     * A configuration change or process restore recreates the activity with the
+     * same intent, so leaving EXTRA_STREAM in place would re-import and re-scan
+     * the file on every rotation (duplicate report, duplicate history entry).
+     */
+    private fun consumeSharedApk(intent: Intent?): Uri? {
+        val uri = sharedApkUri(intent) ?: return null
+        intent?.removeExtra(Intent.EXTRA_STREAM)
+        return uri
     }
 
     /** A package archive shared from Files or any other app, if this intent carries one. */
