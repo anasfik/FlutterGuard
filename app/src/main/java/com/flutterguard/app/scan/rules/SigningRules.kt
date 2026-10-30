@@ -49,14 +49,7 @@ object SigningRules {
             evidence = emptyList(),
             remediation = "Release builds must be signed with the production keystore.",
         )
-        if ("v1" in schemes && "v2" !in schemes) findings += Finding(
-            id = "SIG-V1-ONLY",
-            title = "Only the legacy JAR (v1) signature scheme",
-            severity = Severity.MEDIUM,
-            detail = "No APK Signature Scheme v2+ block found. v1-only artifacts are vulnerable to the Janus family of attacks (CVE-2017-13156) and strip-attacks.",
-            evidence = emptyList(),
-            remediation = "Sign with v2/v3 (default for modern build tooling).",
-        )
+        if ("v1" in schemes && "v2" !in schemes) findings += v1OnlyFinding()
         if (rotation) notes.add("Key rotation history present (v3 past signers)")
         if (certs.size > 1) notes.add("Multiple signers")
 
@@ -77,6 +70,42 @@ object SigningRules {
         )
         return info to findings
     }
+
+    /**
+     * Signing facts for a file scan: no PackageManager entry exists, so the
+     * certificate chain is unavailable. Scheme presence is still read from the
+     * archive, and the same v1-only warning applies.
+     */
+    fun forFile(baseApk: java.io.File?, zipNames: Set<String>): Pair<SigningInfo, List<Finding>> {
+        val schemes = baseApk?.let { detectSchemes(it.absolutePath, zipNames) }.orEmpty()
+        val notes = ArrayList<String>()
+        notes.add("File scan: package-manager signing identity is unavailable; schemes are read from the archive.")
+        val findings = ArrayList<Finding>()
+        if ("v1" in schemes && "v2" !in schemes) findings += v1OnlyFinding()
+        val info = SigningInfo(
+            signerSubject = null,
+            signerIssuer = null,
+            sha256Fingerprint = null,
+            debugCert = false,
+            multipleSigners = false,
+            rotationHistory = false,
+            validFrom = null,
+            validTo = null,
+            sigAlgorithm = null,
+            schemes = schemes,
+            notes = notes,
+        )
+        return info to findings
+    }
+
+    private fun v1OnlyFinding(): Finding = Finding(
+        id = "SIG-V1-ONLY",
+        title = "Only the legacy JAR (v1) signature scheme",
+        severity = Severity.MEDIUM,
+        detail = "No APK Signature Scheme v2+ block found. v1-only artifacts are vulnerable to the Janus family of attacks (CVE-2017-13156) and strip-attacks.",
+        evidence = emptyList(),
+        remediation = "Sign with v2/v3 (default for modern build tooling).",
+    )
 
     /**
      * Detects which signing schemes are present. v1: JAR signature files

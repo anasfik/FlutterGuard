@@ -33,6 +33,12 @@ sealed interface Destination {
      * pushes [Details] on top of this route, so Back returns here.
      */
     data object Queue : Destination
+
+    /** App behaviour, consent and legal entry points. No payload. */
+    data object Settings : Destination
+
+    /** One bundled policy document, rendered as Markdown. [doc] is a [LegalDocs] name. */
+    data class Legal(val doc: String) : Destination
 }
 
 /**
@@ -75,6 +81,8 @@ object NavStack {
     fun stateKey(destination: Destination): String = when (destination) {
         Destination.Home -> "home"
         Destination.Queue -> "queue"
+        Destination.Settings -> "settings"
+        is Destination.Legal -> "legal\u001F${destination.doc}"
         is Destination.Details -> "details\u001F${destination.packageName}"
         is Destination.Section -> "section\u001F${destination.packageName}\u001F${destination.target.name}"
     }
@@ -90,6 +98,8 @@ object NavStack {
     fun encode(destination: Destination): String = when (destination) {
         Destination.Home -> "home"
         Destination.Queue -> "queue"
+        Destination.Settings -> "settings"
+        is Destination.Legal -> "legal$SEP${destination.doc}"
         is Destination.Details -> "details$SEP${destination.packageName}$SEP${destination.section}"
         is Destination.Section ->
             "section$SEP${destination.packageName}$SEP${destination.target.name}$SEP${destination.filter}"
@@ -102,6 +112,8 @@ object NavStack {
         return when (parts[0]) {
             "home" -> Destination.Home
             "queue" -> Destination.Queue
+            "settings" -> Destination.Settings
+            "legal" -> parts.getOrNull(1)?.takeIf { it in LegalDocs.names }?.let { Destination.Legal(it) }
             "details" -> parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { packageName ->
                 Destination.Details(packageName, parts.getOrNull(2).orEmpty().ifBlank { DetailsSections.first() })
             }

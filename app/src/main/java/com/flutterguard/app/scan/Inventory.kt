@@ -46,6 +46,13 @@ object InventoryStore {
      * explicit refresh action from the initial load of an already cached list.
      */
     fun refresh(context: Context, force: Boolean = false): Boolean {
+        // Inventory is the only path that enumerates installed packages. Without
+        // consent for the current policy it must not run at all, not merely hide
+        // the result: file-pick mode stays fully usable.
+        if (!com.flutterguard.app.settings.Settings.snapshot(context).inventoryAllowed()) {
+            _state.value = InventoryState()
+            return false
+        }
         val current = _state.value
         if (current.hasData && !force) return false
         val loading = current.begin() ?: return false
@@ -56,7 +63,13 @@ object InventoryStore {
         scope.launch {
             try {
                 runCatching { Discovery.loadApps(appContext) }
-                    .onSuccess { _state.value = _state.value.loaded(it, System.currentTimeMillis()) }
+                    .onSuccess {
+                        // Consent may have been withdrawn while discovery ran: never
+                        // publish a list the user just revoked access to.
+                        if (com.flutterguard.app.settings.Settings.snapshot(appContext).inventoryAllowed()) {
+                            _state.value = _state.value.loaded(it, System.currentTimeMillis())
+                        }
+                    }
                     .onFailure { t ->
                         _state.value = _state.value.failed(t.message ?: t::class.java.simpleName)
                     }

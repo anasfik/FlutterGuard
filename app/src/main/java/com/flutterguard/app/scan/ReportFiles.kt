@@ -77,10 +77,25 @@ object ReportFiles {
     fun previousHistory(dir: File, packageName: String): String? =
         runCatching { historyFile(dir, packageName).readText() }.getOrNull()
 
-    fun save(dir: File, packageName: String, json: String, history: String): SavedReport {
+    fun save(
+        dir: File,
+        packageName: String,
+        json: String,
+        history: String,
+        /** False when the user turned scan history off: the report is still written. */
+        writeHistory: Boolean = true,
+    ): SavedReport {
         dir.mkdirs()
         val jsonTarget = jsonFile(dir, packageName)
         writeAtomically(jsonTarget, json)
+
+        if (!writeHistory) {
+            return SavedReport(
+                jsonTarget,
+                null,
+                "Scan history is turned off in Settings, so no version log was written for this scan.",
+            )
+        }
 
         val histTarget = historyFile(dir, packageName)
         // One retained log per app (bounded), merged into the same atomic write.
@@ -145,6 +160,20 @@ object ReportFiles {
 
     private fun inflightFile(dir: File, packageName: String): File =
         File(dir, baseName(packageName) + INFLIGHT_SUFFIX)
+
+    /**
+     * Deletes every artifact this app wrote into [dir]: reports, history logs,
+     * interrupted markers and half-written temporaries. Used by the confirmed
+     * "Delete all reports" action. Returns how many files were removed.
+     */
+    fun deleteAll(dir: File): Int =
+        dir.listFiles()
+            ?.filter { f ->
+                f.isFile && (f.name.endsWith(JSON_SUFFIX) || f.name.endsWith(HISTORY_SUFFIX) ||
+                    f.name.endsWith(INFLIGHT_SUFFIX) || f.name.endsWith(TMP_SUFFIX))
+            }
+            ?.count { runCatching { it.delete() }.getOrDefault(false) }
+            ?: 0
 
     private fun writeAtomically(target: File, text: String) {
         target.parentFile?.mkdirs()

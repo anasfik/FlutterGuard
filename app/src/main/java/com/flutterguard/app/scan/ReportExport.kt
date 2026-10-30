@@ -91,6 +91,7 @@ object ReportExport {
             meta["splitCount"] = safe.meta.splitCount
             meta["abis"] = safe.meta.abis
             meta["baseApkSha256"] = safe.meta.baseSha256
+            meta["fileScan"] = safe.meta.fileScan
             meta["nativeLibs"] = safe.meta.nativeLibs.map { l ->
                 linkedMapOf(
                     "name" to l.name, "abi" to l.abi, "size" to l.sizeBytes,
@@ -204,6 +205,9 @@ object ReportExport {
 
             if (ReportSection.OVERVIEW in sections) {
                 appendLine("- Version: ${safe.meta.versionName ?: "?"} (${safe.meta.versionCode}) · SDK ${safe.meta.minSdk ?: "?"}→${safe.meta.targetSdk ?: "?"} · size ${safe.meta.sizeBytes / 1024 / 1024} MB · ${safe.meta.splitCount} split(s) · ABI ${safe.meta.abis.joinToString()}")
+                if (safe.meta.fileScan) {
+                    appendLine("- Source: **picked APK file** — package identity comes from the manifest, not an installed app.")
+                }
                 appendLine("- Framework: ${if (safe.framework.isFlutter) "Flutter ${safe.framework.dartVersion ?: ""} (${safe.framework.buildMode ?: "?"}, obfuscated=${safe.framework.obfuscated})" else safe.framework.otherFrameworks.joinToString().ifEmpty { "native" }}")
                 appendLine("- Signing: ${safe.signing.schemes.joinToString("/").ifEmpty { "?" }}${if (safe.signing.debugCert) " · DEBUG CERT" else ""} · SHA-256 ${safe.signing.sha256Fingerprint?.take(16)}…")
                 appendLine("- Grade: **${safe.grade}** — ${safe.stats.critical} critical, ${safe.stats.high} high, ${safe.stats.medium} medium, ${safe.stats.low} low, ${safe.stats.info} info (${safe.stats.stringsScanned} strings scanned in ${safe.stats.durationMs / 1000}s)")

@@ -3,11 +3,13 @@ package com.flutterguard.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -25,16 +27,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.flutterguard.app.scan.FileImport
 import com.flutterguard.app.scan.InventoryStore
 import com.flutterguard.app.scan.ReportFiles
 import com.flutterguard.app.scan.ScanPhase
 import com.flutterguard.app.scan.ScanStore
 import com.flutterguard.app.scan.packageName
+import com.flutterguard.app.settings.ConsentPolicy
+import com.flutterguard.app.settings.Settings
 import com.flutterguard.app.ui.AppFilter
+import com.flutterguard.app.ui.ConsentDialog
 import com.flutterguard.app.ui.Destination
 import com.flutterguard.app.ui.DetailsScreen
 import com.flutterguard.app.ui.FlutterGuardTheme
 import com.flutterguard.app.ui.HomeScreen
+import com.flutterguard.app.ui.LegalScreen
 import com.flutterguard.app.ui.NavStack
 import com.flutterguard.app.ui.PackageId
 import com.flutterguard.app.ui.QueueRoute
@@ -42,12 +49,18 @@ import com.flutterguard.app.ui.ScanNotifier
 import com.flutterguard.app.ui.ScanQueueRunner
 import com.flutterguard.app.ui.SearchUi
 import com.flutterguard.app.ui.SectionRoute
+import com.flutterguard.app.ui.SettingsScreen
 import com.flutterguard.app.ui.scanPhaseFeed
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
     /** Kept observable so the UI can say "no notification" instead of promising one. */
     private var notificationsAllowed by mutableStateOf(true)
+
+    /** An APK shared to FlutterGuard (ACTION_SEND); consumed once by [AppNav]. */
+    private var sharedApk by mutableStateOf<Uri?>(null)
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -63,11 +76,18 @@ class MainActivity : ComponentActivity() {
             finish()
             return
         }
+        sharedApk = sharedApkUri(intent)
+        Settings.load(this)
         notificationsAllowed = NotificationManagerCompat.from(this).areNotificationsEnabled()
-        askForNotificationPermission()
+        if (Settings.snapshot(this).notifications) askForNotificationPermission()
         setContent {
             FlutterGuardTheme {
-                AppNav(notificationsAllowed = notificationsAllowed)
+                AppNav(
+                    notificationsAllowed = notificationsAllowed,
+                    sharedApk = sharedApk,
+                    // Consume the share once: a rotation must not re-import it.
+                    onSharedConsumed = { sharedApk = null },
+                )
             }
         }
     }
@@ -79,7 +99,18 @@ class MainActivity : ComponentActivity() {
         // otherwise scripted scans fail silently whenever the app is open.
         if (handleScanIntent(intent)) {
             finish()
+            return
         }
+        sharedApkUri(intent)?.let { sharedApk = it }
+    }
+
+    /** A package archive shared from Files or any other app, if this intent carries one. */
+    private fun sharedApkUri(intent: Intent?): Uri? {
+        if (intent?.action != Intent.ACTION_SEND) return null
+        val type = intent.type.orEmpty()
+        if (!type.contains("package-archive") && type != "application/zip" && type != "application/octet-stream") return null
+        @Suppress("DEPRECATION")
+        return intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
     }
 
     /** Returns true when the intent carries a headless scan request (handled or attempted). */
@@ -103,6 +134,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** One file-pick or share import; [id] makes a repeated pick a new effect key. */
+private data class FileImportRequest(val uri: Uri, val id: Long)
+
 /**
  * Navigation + state that must survive screen changes: the inventory, scan
  * state, search, filters and list scroll live here (process stores +
@@ -117,11 +151,12 @@ class MainActivity : ComponentActivity() {
  * restarts anything.
  */
 @Composable
-private fun AppNav(notificationsAllowed: Boolean) {
+private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsumed: () -> Unit) {
     val context = LocalContext.current
     val inventory by InventoryStore.state.collectAsState()
     val scan by ScanStore.state.collectAsState()
     val queue by ScanQueueRunner.state.collectAsState()
+    val settings by Settings.state.collectAsState()
 
     // Saved as plain strings (NavStack.save/restore): a rotation keeps the
     // route the user was on without a navigation dependency.
@@ -145,6 +180,42 @@ private fun AppNav(notificationsAllowed: Boolean) {
     val listState = rememberLazyListState()
     var interrupted by remember { mutableStateOf<List<String>>(emptyList()) }
 
+    // Picker and share-sheet both land here; one import effect serves both.
+    // The request carries a sequence so picking the same file twice is a new key
+    // (clearing the state inside its own effect would cancel the copy).
+    var importRequest by remember { mutableStateOf<FileImportRequest?>(null) }
+    val importSeq = remember { java.util.concurrent.atomic.AtomicLong(0) }
+    val queueImport: (Uri) -> Unit = { uri ->
+        importRequest = FileImportRequest(uri, importSeq.incrementAndGet())
+    }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) queueImport(uri)
+    }
+    val pickFile: () -> Unit = {
+        // Any MIME type: files apps disagree on what an APK is; the manifest decides.
+        filePicker.launch(arrayOf("*/*"))
+    }
+
+    // Consent gate: before ANY installed-app enumeration. It is a dialog over the
+    // main screen, not a wall in front of it — declining must leave a usable app
+    // with a visible way to ask again, not a dead end.
+    if (ConsentPolicy.needsDisclosure(settings.consentVersion)) {
+        ConsentDialog(
+            onAgree = {
+                Settings.update(context) {
+                    it.copy(consentVersion = ConsentPolicy.POLICY_VERSION, inventoryConsent = true)
+                }
+                InventoryStore.refresh(context)
+            },
+            onDecline = {
+                Settings.update(context) {
+                    it.copy(consentVersion = ConsentPolicy.POLICY_VERSION, inventoryConsent = false)
+                }
+                InventoryStore.reset()
+            },
+        )
+    }
+
     LaunchedEffect(Unit) {
         // A leftover marker means the process died mid-scan: say so, never call it a success.
         // A scan that is still running owns its marker, so only stale markers are reported and cleared.
@@ -152,7 +223,41 @@ private fun AppNav(notificationsAllowed: Boolean) {
         val live = listOfNotNull(ScanStore.state.value.running?.job?.packageName)
         interrupted = ReportFiles.interrupted(dir, keep = live)
         ReportFiles.clearInterrupted(dir, keep = live)
-        InventoryStore.refresh(context)
+        // The gate above only asks; it does not grant. Enumerate nothing until
+        // the user has actually agreed.
+        if (settings.inventoryAllowed()) InventoryStore.refresh(context)
+    }
+
+    // A shared or picked APK: copy it, identify it from its manifest, then hand
+    // the copy to the single scan owner. The report screen opens immediately so
+    // progress and failure are visible where the user expects them.
+    LaunchedEffect(sharedApk) {
+        val uri = sharedApk ?: return@LaunchedEffect
+        queueImport(uri)
+        onSharedConsumed()
+    }
+    LaunchedEffect(importRequest) {
+        val request = importRequest ?: return@LaunchedEffect
+        val result = withContext(Dispatchers.IO) { runCatching { FileImport.prepare(context, request.uri) } }
+        result.onSuccess { imported ->
+            if (ScanService.startFile(context, imported.packageName, imported.file)) {
+                search = search.collapse()
+                stack = NavStack.push(stack, Destination.Details(imported.packageName))
+            } else {
+                imported.file.delete()
+                Toast.makeText(
+                    context,
+                    "Import not started: a scan is running or still stopping.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }.onFailure {
+            Toast.makeText(
+                context,
+                "Could not read that file: ${it.message ?: "not an APK"}",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 
     val current = NavStack.current(stack)
@@ -174,7 +279,7 @@ private fun AppNav(notificationsAllowed: Boolean) {
             // A See-all list is still this app's data on screen.
             is Destination.Section -> current.packageName
             // The queue route watches the queue, not one app's terminal phase.
-            Destination.Home, Destination.Queue -> null
+            Destination.Home, Destination.Queue, Destination.Settings, is Destination.Legal -> null
         },
     )
     LaunchedEffect(Unit) {
@@ -183,7 +288,8 @@ private fun AppNav(notificationsAllowed: Boolean) {
                 phase is ScanPhase.Failed ||
                 phase is ScanPhase.Cancelled
             if (terminal && !ScanQueueRunner.state.value.active && phase.packageName != viewing.value) {
-                ScanNotifier.terminal(context, phase)
+                // The setting is read at event time, not captured at launch.
+                if (Settings.snapshot(context).notifications) ScanNotifier.terminal(context, phase)
             }
         }
     }
@@ -248,7 +354,9 @@ private fun AppNav(notificationsAllowed: Boolean) {
                     stack = NavStack.push(stack, Destination.Queue)
                 },
                 onScanAll = { apps ->
-                    if (ScanQueueRunner.start(context, apps)) {
+                    if (!Settings.snapshot(context).scanAll) {
+                        Toast.makeText(context, "Scan all apps is turned off in Settings.", Toast.LENGTH_LONG).show()
+                    } else if (ScanQueueRunner.start(context, apps)) {
                         search = search.collapse()
                         stack = NavStack.push(stack, Destination.Queue)
                     } else {
@@ -258,6 +366,18 @@ private fun AppNav(notificationsAllowed: Boolean) {
                             Toast.LENGTH_LONG,
                         ).show()
                     }
+                },
+                inventoryAllowed = settings.inventoryAllowed(),
+                scanAllAllowed = settings.scanAll,
+                onOpenSettings = {
+                    search = search.collapse()
+                    stack = NavStack.push(stack, Destination.Settings)
+                },
+                onPickFile = pickFile,
+                onRequestInventory = {
+                    // Re-arms the disclosure dialog without leaving the main screen.
+                    Settings.update(context) { it.copy(consentVersion = 0, inventoryConsent = false) }
+                    InventoryStore.reset()
                 },
             )
             is Destination.Details -> DetailsScreen(
@@ -301,6 +421,29 @@ private fun AppNav(notificationsAllowed: Boolean) {
                     stack = NavStack.pop(stack)
                 },
             )
+            Destination.Settings -> SettingsScreen(
+                settings = settings,
+                notificationsAllowed = notificationsAllowed,
+                onBack = { stack = NavStack.pop(stack) },
+                onChange = { transform -> Settings.update(context, transform) },
+                onOpenLegal = { doc -> stack = NavStack.push(stack, Destination.Legal(doc)) },
+                onWithdrawConsent = {
+                    // Back to the disclosure, with inventory revoked immediately.
+                    Settings.update(context) { it.copy(consentVersion = 0, inventoryConsent = false) }
+                    InventoryStore.reset()
+                    search = search.collapse()
+                    stack = NavStack.root()
+                },
+                onReopenDisclosure = {
+                    // Same route as withdrawing: consentVersion 0 re-arms the
+                    // disclosure dialog, so Agree is reachable after a decline.
+                    Settings.update(context) { it.copy(consentVersion = 0, inventoryConsent = false) }
+                    InventoryStore.reset()
+                    search = search.collapse()
+                    stack = NavStack.root()
+                },
+            )
+            is Destination.Legal -> LegalScreen(doc = current.doc, onBack = { stack = NavStack.pop(stack) })
         }
     }
 }

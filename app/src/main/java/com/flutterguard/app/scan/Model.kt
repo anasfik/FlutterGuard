@@ -100,6 +100,12 @@ data class AppMeta(
     val abis: List<String>,
     val nativeLibs: List<NativeLib>,
     val baseSha256: String,
+    /**
+     * True when the artifact came from a picked/shared file rather than an
+     * installed app: [packageName] is the manifest value, not a package-manager
+     * entry, and the UI says so.
+     */
+    val fileScan: Boolean = false,
 )
 
 data class NativeLib(val name: String, val abi: String, val sizeBytes: Long, val sha256: String?, val versionMarkers: List<String>)

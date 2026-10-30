@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shield + magnifier: "audit an artifact", no text and no gradient.
+     108x108 viewport with all artwork inside the 72dp adaptive safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Shield body -->
+    <path
+        android:fillColor="#00363D"
+        android:pathData="M54,23 L80,32 L80,53 C80,70 69,81 54,87 C39,81 28,70 28,53 L28,32 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4DD9E8"
+        android:strokeWidth="3.5"
+        android:strokeLineJoin="round"
+        android:pathData="M54,23 L80,32 L80,53 C80,70 69,81 54,87 C39,81 28,70 28,53 L28,32 Z" />
+
+    <!-- Magnifier lens -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4DD9E8"
+        android:strokeWidth="4.5"
+        android:pathData="M52,40 a10,10 0 1,0 0.1,0 z" />
+    <!-- Magnifier handle -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#4DD9E8"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M59.5,56.5 L67,64" />
+    <!-- Handle joins the lens at 45 degrees; the small nub keeps the mark legible at 48dp. -->
+    <path
+        android:fillColor="#4DD9E8"
+        android:pathData="M58,54 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0" />
+</vector>

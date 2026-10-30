@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -106,6 +107,11 @@ internal fun HomeScreen(
     queue: ScanQueueState,
     onOpenQueue: () -> Unit,
     onScanAll: (List<QueueApp>) -> Unit,
+    inventoryAllowed: Boolean,
+    scanAllAllowed: Boolean,
+    onOpenSettings: () -> Unit,
+    onPickFile: () -> Unit,
+    onRequestInventory: () -> Unit,
 ) {
     var confirmScanAll by remember { mutableStateOf(false) }
     val query = search.query
@@ -123,8 +129,13 @@ internal fun HomeScreen(
                         )
                     },
                     actions = {
-                        IconButton(onClick = onRefresh, enabled = !state.loading, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh installed apps")
+                        IconButton(onClick = onOpenSettings, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
+                        if (inventoryAllowed) {
+                            IconButton(onClick = onRefresh, enabled = !state.loading, modifier = Modifier.size(48.dp)) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh installed apps")
+                            }
                         }
                     },
                 )
@@ -168,27 +179,31 @@ internal fun HomeScreen(
                     }
                 }
 
-                item {
-                    ChipRow {
-                        WorkbenchChip(selected = !advanced, onClick = { onAdvanced(false) }, label = "Normal")
-                        WorkbenchChip(selected = advanced, onClick = { onAdvanced(true) }, label = "Advanced")
-                    }
-                }
-
-                if (advanced) {
+                if (inventoryAllowed) {
                     item {
-                        ToolsPanel(
-                            appCount = scanAllCount,
-                            packageInput = packageInput,
-                            onPackageInput = onPackageInput,
-                            packageError = packageError,
-                            running = running != null,
-                            queueActive = queue.active,
-                            filter = filter,
-                            onFilter = onFilter,
-                            onScanPackage = onScanPackage,
-                            onScanAll = { confirmScanAll = true },
-                        )
+                        ChipRow {
+                            WorkbenchChip(selected = !advanced, onClick = { onAdvanced(false) }, label = "Normal")
+                            WorkbenchChip(selected = advanced, onClick = { onAdvanced(true) }, label = "Advanced")
+                        }
+                    }
+
+                    if (advanced) {
+                        item {
+                            ToolsPanel(
+                                appCount = scanAllCount,
+                                packageInput = packageInput,
+                                onPackageInput = onPackageInput,
+                                packageError = packageError,
+                                running = running != null,
+                                queueActive = queue.active,
+                                filter = filter,
+                                onFilter = onFilter,
+                                onScanPackage = onScanPackage,
+                                onScanAll = { confirmScanAll = true },
+                                scanAllAllowed = scanAllAllowed,
+                                onPickFile = onPickFile,
+                            )
+                        }
                     }
                 }
 
@@ -212,6 +227,39 @@ internal fun HomeScreen(
                 }
 
                 when {
+                    !inventoryAllowed -> {
+                        item {
+                            // The main screen keeps its shape: app scanning is the
+                            // product, and asking for it is the primary action here.
+                            // One file at a time is the fallback, not the offer.
+                            Column(
+                                Modifier.fillMaxWidth().padding(Gutter),
+                                verticalArrangement = Arrangement.spacedBy(Space.s),
+                            ) {
+                                Text(
+                                    "App scanning is off",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.semantics { heading() },
+                                )
+                                Text(
+                                    "FlutterGuard cannot see which apps are installed until you allow it. Android grants broad package visibility when the app is installed, so there is no system prompt — this is FlutterGuard asking.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(Space.xs))
+                                Button(
+                                    onClick = onRequestInventory,
+                                    modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
+                                ) { Text("Enable app scanning") }
+                                TextAction("Scan a single APK instead", onPickFile)
+                                Text(
+                                    "A single-file scan works without that access and is labelled as a file scan.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
                     !state.hasData && state.loading -> {
                         item { LoadingRow("Enumerating installed apps…") }
                         items(4) { SkeletonRow() }
@@ -271,7 +319,7 @@ internal fun HomeScreen(
     }
 
     val scanAllTargets = state.apps.filter { it.isFlutter && !it.isSystem }
-    if (confirmScanAll) {
+    if (confirmScanAll && scanAllAllowed) {
         AlertDialog(
             onDismissRequest = { confirmScanAll = false },
             title = { Text("Scan ${scanAllTargets.size} Flutter apps?") },

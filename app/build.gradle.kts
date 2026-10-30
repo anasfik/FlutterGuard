@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.flutterguard.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.flutterguard.app"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 6
         versionName = "0.3.1"
     }

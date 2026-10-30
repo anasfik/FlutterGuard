@@ -16,6 +16,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import com.flutterguard.app.scan.Discovery
 import com.flutterguard.app.scan.History
+import com.flutterguard.app.scan.Report
 import com.flutterguard.app.scan.ReportExport
 import com.flutterguard.app.scan.ReportFiles
 import com.flutterguard.app.scan.ScanCancelledException
@@ -57,8 +58,11 @@ class ScanService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 val pkg = intent.getStringExtra(EXTRA_PACKAGE)
+                val filePath = intent.getStringExtra(EXTRA_FILE)
                 if (pkg.isNullOrBlank()) {
                     stopSelf(startId)
+                } else if (filePath != null) {
+                    startFileScan(pkg, java.io.File(filePath), intent.getBooleanExtra(EXTRA_HEADLESS, false))
                 } else {
                     startScan(pkg, intent.getBooleanExtra(EXTRA_HEADLESS, false))
                 }
@@ -70,6 +74,28 @@ class ScanService : Service() {
     }
 
     private fun startScan(packageName: String, headless: Boolean) {
+        // The installed-app path is gated on explicit consent for the current
+        // policy: the UI never enumerates before it agrees, and the service
+        // refuses a start that bypassed the UI (scripted or stale intent).
+        if (!com.flutterguard.app.settings.Settings.snapshot(this).inventoryAllowed()) {
+            if (headless) Log.w(TAG, "FG_ERROR installed-app scan needs privacy consent: $packageName")
+            refuseScan(packageName, "Installed-app scans are off until you agree to the privacy disclosure")
+            return
+        }
+        startJob(packageName, headless, file = null)
+    }
+
+    /** A picked/shared APK: package identity is already decoded by [com.flutterguard.app.scan.FileImport]. */
+    private fun startFileScan(packageName: String, file: java.io.File, headless: Boolean) {
+        if (!file.isFile) {
+            if (headless) Log.e(TAG, "FG_ERROR imported APK is gone: ${file.name}")
+            refuseScan(packageName, "The imported APK is no longer available")
+            return
+        }
+        startJob(packageName, headless, file)
+    }
+
+    private fun startJob(packageName: String, headless: Boolean, file: java.io.File?) {
         // The store refuses a second job while any scanner body is still running,
         // even one whose job already failed (timeout/cancel): no overlap, no hiding.
         val job = ScanStore.start(packageName)
@@ -85,7 +111,7 @@ class ScanService : Service() {
         if (headless) Log.i(TAG, "FG_START $packageName")
         // The execution slot is freed by the launch itself, not by execute()'s
         // finally: a launch cancelled before the body runs must not brick scanning.
-        work = ScanStore.launchExecution(scope, job.id) { execute(job, token) }
+        work = ScanStore.launchExecution(scope, job.id) { execute(job, token, file) }
     }
 
     /**
@@ -121,41 +147,57 @@ class ScanService : Service() {
         finishForeground()
     }
 
-    private suspend fun execute(job: ScanJob, token: ScanToken) {
+    private suspend fun execute(job: ScanJob, token: ScanToken, file: java.io.File?) {
         val packageName = job.packageName
         val dir = ReportFiles.appDir(this)
+        val settings = com.flutterguard.app.settings.Settings.snapshot(this)
         var stage = "Reading package info"
-        try {
-            val app = try {
-                Discovery.load(this, packageName)
-            } catch (t: Throwable) {
-                // Removed package or unreadable package manager entry: a visible failure, never a success.
-                fail(job, token, "Not installed or unreadable: ${t.message ?: t::class.java.simpleName}")
-                return
+        val onProgress: (String, Int) -> Unit = { step, pct ->
+            if (!token.isAbandoned) {
+                stage = step
+                ScanStore.progress(job.id, step, pct)
+                goForeground(token, packageName, step, pct)
+                if (headless) Log.i(TAG, "FG_PROGRESS $pct% $step")
             }
+        }
+        val isCancelled: () -> Boolean = { token.isAbandoned || ScanStore.isCancelled(job.id) }
+        try {
+            val previous: String?
+            val report: Report
+            if (file != null) {
+                // File scan: the manifest identity was resolved before the service
+                // started, so report/history storage matches an installed-app scan.
+                ReportFiles.markInflight(dir, packageName)
+                previous = if (settings.keepHistory) ReportFiles.previousHistory(dir, packageName) else null
+                report = Scanner.scanFile(this, file, onProgress, isCancelled)
+            } else {
+                val app = try {
+                    Discovery.load(this, packageName)
+                } catch (t: Throwable) {
+                    // Removed package or unreadable package manager entry: a visible failure, never a success.
+                    fail(job, token, "Not installed or unreadable: ${t.message ?: t::class.java.simpleName}")
+                    return
+                }
 
-            ReportFiles.markInflight(dir, packageName)
-            val previous = ReportFiles.previousHistory(dir, packageName)
+                ReportFiles.markInflight(dir, packageName)
+                previous = if (settings.keepHistory) ReportFiles.previousHistory(dir, packageName) else null
 
-            val report = Scanner.scan(
-                context = this,
-                app = app,
-                onProgress = { step, pct ->
-                    if (!token.isAbandoned) {
-                        stage = step
-                        ScanStore.progress(job.id, step, pct)
-                        goForeground(token, packageName, step, pct)
-                        if (headless) Log.i(TAG, "FG_PROGRESS $pct% $step")
-                    }
-                },
-                isCancelled = { token.isAbandoned || ScanStore.isCancelled(job.id) },
-            )
+                report = Scanner.scan(
+                    context = this,
+                    app = app,
+                    onProgress = onProgress,
+                    isCancelled = isCancelled,
+                )
+            }
 
             // An abandoned job (timeout/destroy) must not persist anything.
             if (token.isAbandoned) return
             val json = ReportExport.toJson(report)
             if (token.isAbandoned) return
-            val saved = ReportFiles.save(dir, packageName, json, History.snapshot(report))
+            val saved = ReportFiles.save(
+                dir, packageName, json, History.snapshot(report),
+                writeHistory = settings.keepHistory,
+            )
             if (token.isAbandoned) return
             val diff = previous?.let {
                 runCatching { History.diff(it, History.snapshot(report)) }.getOrDefault(emptyList())
@@ -175,6 +217,8 @@ class ScanService : Service() {
         } finally {
             // Keep the marker of an abandoned scan: it is the interruption signal.
             if (!token.isAbandoned) ReportFiles.clearInflight(dir, packageName)
+            // The cache copy exists only for this job; an abandoned job also drops it.
+            if (file != null) runCatching { file.delete() }
             if (activeId == job.id && activeToken === token) {
                 activeId = -1L
                 activeToken = null
@@ -324,6 +368,7 @@ class ScanService : Service() {
         const val ACTION_CANCEL = "com.flutterguard.app.action.CANCEL_SCAN"
         const val EXTRA_PACKAGE = "package"
         const val EXTRA_HEADLESS = "headless"
+        const val EXTRA_FILE = "apkFile"
 
         /** Returns false when the foreground service could not be started (e.g. background start restrictions). */
         fun start(context: Context, packageName: String, headless: Boolean = false): Boolean {
@@ -336,6 +381,27 @@ class ScanService : Service() {
                 true
             } catch (t: Throwable) {
                 Log.e(TAG, if (headless) "FG_ERROR ${t.message}" else "Could not start scan service: ${t.message}")
+                false
+            }
+        }
+
+        /** Starts an audit of a picked/shared APK already copied into the app cache. */
+        fun startFile(
+            context: Context,
+            packageName: String,
+            file: java.io.File,
+            headless: Boolean = false,
+        ): Boolean {
+            val intent = Intent(context, ScanService::class.java)
+                .setAction(ACTION_START)
+                .putExtra(EXTRA_PACKAGE, packageName)
+                .putExtra(EXTRA_FILE, file.absolutePath)
+                .putExtra(EXTRA_HEADLESS, headless)
+            return try {
+                context.startForegroundService(intent)
+                true
+            } catch (t: Throwable) {
+                Log.e(TAG, if (headless) "FG_ERROR ${t.message}" else "Could not start file scan: ${t.message}")
                 false
             }
         }

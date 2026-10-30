@@ -1,6 +1,8 @@
 package com.flutterguard.app.scan
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import com.flutterguard.app.scan.parsers.AxmlDecoder
@@ -66,6 +68,98 @@ object Scanner {
         onProgress: (step: String, pct: Int) -> Unit,
         isCancelled: () -> Boolean = { false },
     ): Report = withContext(Dispatchers.IO) {
+        val pm = context.packageManager
+        var flags = PackageManager.GET_ACTIVITIES or PackageManager.GET_SERVICES or
+            PackageManager.GET_RECEIVERS or PackageManager.GET_PROVIDERS or PackageManager.GET_PERMISSIONS
+        if (Build.VERSION.SDK_INT >= 28) flags = flags or PackageManager.GET_SIGNING_CERTIFICATES
+        // Resolved at scan time: the cached InstalledApp carries no platform object,
+        // and a package removed since discovery fails here visibly.
+        val pi = pm.getPackageInfo(app.packageName, flags)
+        val ai = pm.getApplicationInfo(app.packageName, 0)
+        ApkSource.forApplication(ai).use { src ->
+            scanWith(context, app, src, pi, ai, null, onProgress, isCancelled)
+        }
+    }
+
+    /**
+     * Audits one APK the user picked or shared. There is no PackageManager entry,
+     * so identity comes from the decoded manifest and signing is read from the
+     * archive (schemes only — no platform certificate chain). Everything after
+     * that is the installed-app scan path, unchanged.
+     */
+    suspend fun scanFile(
+        context: Context,
+        file: java.io.File,
+        onProgress: (step: String, pct: Int) -> Unit,
+        isCancelled: () -> Boolean = { false },
+    ): Report = withContext(Dispatchers.IO) {
+        ApkSource.forFile(file).use { src ->
+            val root = src.bytes("AndroidManifest.xml", maxBytes = 8 * 1024 * 1024)
+                ?.let { AxmlDecoder.decode(it) }
+                ?: throw IllegalArgumentException("No readable AndroidManifest.xml in this file; is it an APK?")
+            val meta = fileMeta(root, file.name)
+                ?: throw IllegalArgumentException("The manifest declares no package name.")
+            val app = InstalledApp(
+                packageName = meta.packageName,
+                label = meta.label,
+                versionName = meta.versionName,
+                versionCode = meta.versionCode,
+                minSdk = meta.minSdk,
+                targetSdk = meta.targetSdk,
+                isFlutter = false,
+                isSystem = false,
+                sizeBytes = file.length(),
+                splitCount = 0,
+                icon = null,
+            )
+            scanWith(context, app, src, pi = null, ai = null, manifestHint = root, onProgress, isCancelled)
+        }
+    }
+
+    /** Package facts a file scan can recover from the manifest alone. */
+    data class FileMeta(
+        val packageName: String,
+        val label: String,
+        val versionName: String?,
+        val versionCode: Long,
+        val minSdk: Int?,
+        val targetSdk: Int?,
+    )
+
+    /**
+     * Manifest identity for a file scan. Resource references (`@ref/0x…`, `@string/…`)
+     * are not resolved here, so they fall back to null/placeholder rather than a
+     * made-up value. Null only when the manifest has no package name at all.
+     */
+    fun fileMeta(manifest: AxmlNode, fallbackLabel: String): FileMeta? {
+        val pkg = manifest.attr("package")?.takeIf { it.isNotBlank() && !it.startsWith("@") } ?: return null
+        val usesSdk = manifest.child("uses-sdk")
+        fun attrInt(name: String): Int? =
+            manifest.attr(name)?.takeIf { !it.startsWith("@") }?.toIntOrNull()
+                ?: usesSdk?.attr(name)?.takeIf { !it.startsWith("@") }?.toIntOrNull()
+        val label = manifest.child("application")?.attr("label")
+            ?.takeIf { it.isNotBlank() && !it.startsWith("@") }
+            ?: fallbackLabel
+        return FileMeta(
+            packageName = pkg,
+            label = label,
+            versionName = manifest.attr("versionName")?.takeIf { it.isNotBlank() && !it.startsWith("@") },
+            versionCode = attrInt("versionCode")?.toLong() ?: -1L,
+            minSdk = attrInt("minSdkVersion"),
+            targetSdk = attrInt("targetSdkVersion"),
+        )
+    }
+
+    private suspend fun scanWith(
+        context: Context,
+        app: InstalledApp,
+        src: ApkSource,
+        pi: PackageInfo?,
+        ai: ApplicationInfo?,
+        manifestHint: AxmlNode?,
+        onProgress: (step: String, pct: Int) -> Unit,
+        isCancelled: () -> Boolean,
+    ): Report {
         val started = System.currentTimeMillis()
         val pm = context.packageManager
 
@@ -78,46 +172,34 @@ object Scanner {
         }
 
         stage("Reading package info", 2)
-        var flags = PackageManager.GET_ACTIVITIES or PackageManager.GET_SERVICES or
-            PackageManager.GET_RECEIVERS or PackageManager.GET_PROVIDERS or PackageManager.GET_PERMISSIONS
-        if (Build.VERSION.SDK_INT >= 28) flags = flags or PackageManager.GET_SIGNING_CERTIFICATES
-        val pi = pm.getPackageInfo(app.packageName, flags)
-
         stage("Opening APK artifacts", 6)
-        // Resolved at scan time: the cached InstalledApp carries no platform object,
-        // and a package removed since discovery fails here visibly.
-        val ai = pm.getApplicationInfo(app.packageName, 0)
-        val source = ApkSource.forApplication(ai)
-        source.use { src ->
+        return run {
             val zipNames = src.names()
             val findings = ArrayList<Finding>()
 
             // ---------- manifest ----------
             stage("Decoding AndroidManifest", 10)
-            val manifest = src.bytes("AndroidManifest.xml")?.let { AxmlDecoder.decode(it) }
-            val targetSdk = ai.targetSdkVersion.takeIf { it > 0 }
+            val manifest = manifestHint ?: src.bytes("AndroidManifest.xml")?.let { AxmlDecoder.decode(it) }
+            val targetSdk = ai?.targetSdkVersion?.takeIf { it > 0 } ?: app.targetSdk
             val (manifestFindings, facts) = if (manifest != null) {
                 ManifestRules.evaluate(context, manifest, targetSdk)
             } else emptyList<Finding>() to ManifestRules.ManifestFacts()
             findings += manifestFindings
 
             // ---------- metadata ----------
-            val sizeBytes = run {
-                var total = 0L
-                val base = ai.publicSourceDir
-                if (base != null) total += java.io.File(base).length()
-                ai.splitSourceDirs?.forEach { total += java.io.File(it).length() }
-                total
-            }
+            // Same bytes for an installed app (base + splits) and a picked file.
+            val sizeBytes = src.totalBytes()
             val abis = zipNames.asSequence()
                 .filter { it.startsWith("lib/") }
                 .mapNotNull { it.split("/").getOrNull(1) }
                 .toSortedSet()
                 .toList()
-            val installer = runCatching {
-                if (Build.VERSION.SDK_INT >= 30) pm.getInstallSourceInfo(app.packageName).installingPackageName
-                else @Suppress("DEPRECATION") pm.getInstallerPackageName(app.packageName)
-            }.getOrNull()
+            val installer = pi?.let {
+                runCatching {
+                    if (Build.VERSION.SDK_INT >= 30) pm.getInstallSourceInfo(app.packageName).installingPackageName
+                    else @Suppress("DEPRECATION") pm.getInstallerPackageName(app.packageName)
+                }.getOrNull()
+            }
 
             // ---------- resources ----------
             stage("Scanning resource strings", 20)
@@ -364,7 +446,11 @@ object Scanner {
             findings += NetworkRules.evaluate(nsc, facts.usesCleartextTraffic, targetSdk ?: facts.targetSdkAttr, scanner.httpHosts, nscDeclared)
 
             stage("Verifying signing", 85)
-            val (signing, sigFindings) = SigningRules.evaluate(pi, ai.publicSourceDir ?: "", zipNames)
+            val (signing, sigFindings) = if (pi != null && ai?.publicSourceDir != null) {
+                SigningRules.evaluate(pi, ai.publicSourceDir ?: "", zipNames)
+            } else {
+                SigningRules.forFile(src.primaryFile, zipNames)
+            }
             findings += sigFindings
 
             val (fwInfo, flutterFindings) = FlutterRules.evaluate(
@@ -500,19 +586,21 @@ object Scanner {
             val meta = AppMeta(
                 packageName = app.packageName,
                 label = app.label,
-                versionName = pi.versionName,
-                versionCode = if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong(),
-                minSdk = facts.minSdkAttr ?: if (Build.VERSION.SDK_INT >= 24) ai.minSdkVersion.takeIf { it > 0 } else null,
+                versionName = pi?.versionName ?: app.versionName,
+                versionCode = pi?.let { if (Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() }
+                    ?: app.versionCode,
+                minSdk = facts.minSdkAttr ?: ai?.minSdkVersion?.takeIf { it > 0 } ?: app.minSdk,
                 targetSdk = targetSdk ?: facts.targetSdkAttr,
                 installer = installer,
-                firstInstallMs = pi.firstInstallTime,
-                lastUpdateMs = pi.lastUpdateTime,
+                firstInstallMs = pi?.firstInstallTime ?: 0,
+                lastUpdateMs = pi?.lastUpdateTime ?: 0,
                 isSystem = app.isSystem,
                 sizeBytes = sizeBytes,
-                splitCount = src.partCount - 1,
+                splitCount = (src.partCount - 1).coerceAtLeast(0),
                 abis = abis,
                 nativeLibs = nativeLibs,
-                baseSha256 = ai.publicSourceDir?.let { runCatching { ApkSource.sha256(java.io.File(it)) }.getOrNull() } ?: "",
+                baseSha256 = src.primaryFile?.let { runCatching { ApkSource.sha256(it) }.getOrNull() } ?: "",
+                fileScan = pi == null,
             )
             val stats = ReportStats(
                 critical = counts[Severity.CRITICAL] ?: 0,

@@ -52,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,6 +94,7 @@ import com.flutterguard.app.scan.ScanPhase
 import com.flutterguard.app.scan.packageName
 import com.flutterguard.app.scan.ScanStartPolicy
 import com.flutterguard.app.scan.ScanStore
+import com.flutterguard.app.settings.Settings
 import com.flutterguard.app.scan.TextPreview
 import com.flutterguard.app.scan.secretValues
 import kotlinx.coroutines.Dispatchers
@@ -134,6 +136,15 @@ internal fun DetailsScreen(
     val storedFailure = (stored as? StoredReport.Unreadable)?.message
 
     val report = DetailPhase.report(phase, lastSuccess, packageName, storedReport)
+    val settings by Settings.state.collectAsState()
+    // A prompt only: nothing scans in the background. Off by default, so an
+    // untouched install behaves exactly as before.
+    val updatePrompt = if (report != null && app != null && settings.rescanPrompt &&
+        !report.meta.fileScan && report.meta.versionCode != app.versionCode
+    ) {
+        "The installed app is ${app.versionName ?: "?"} (${app.versionCode}); this report was taken from " +
+            "${report.meta.versionName ?: "?"} (${report.meta.versionCode}). Findings may describe the older build."
+    } else null
     val diff = done?.diff ?: retained?.diff.orEmpty()
     val failure = (phase as? ScanPhase.Failed)?.takeIf { mine }
     val cancelled = (phase as? ScanPhase.Cancelled)?.takeIf { mine }
@@ -228,6 +239,8 @@ internal fun DetailsScreen(
                     failureMessage = failure?.message ?: cancelled?.let { "Cancelled — showing the last successful report." },
                     storedNote = storedFailure,
                     runningElsewhere = DetailPhase.runningElsewhere(phase, packageName, hasReport = true),
+                    updatePrompt = updatePrompt,
+                    onRescan = onRescan,
                 )
             }
         }
@@ -249,6 +262,8 @@ private fun ReportWorkspace(
     failureMessage: String?,
     storedNote: String?,
     runningElsewhere: String?,
+    updatePrompt: String?,
+    onRescan: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         ChipRow(Modifier.padding(horizontal = Gutter, vertical = Space.s)) {
@@ -261,6 +276,18 @@ private fun ReportWorkspace(
                 "Another app is being scanned",
                 "$runningElsewhere is running. This report stays readable; scan again when it finishes.",
             )
+        }
+        if (report.meta.fileScan) {
+            Banner(
+                "File scan",
+                "This report was produced from an APK you picked or shared. The package name comes from its " +
+                    "manifest, not from an installed app; findings, exports and history work the same way. " +
+                    "Open the live APK browser only for installed apps.",
+            )
+        }
+        if (updatePrompt != null) {
+            Banner("App updated since this report", updatePrompt)
+            Row(Modifier.padding(horizontal = Gutter)) { TextAction("Re-scan now", onRescan) }
         }
         if (storedNote != null) {
             Banner("Stored report unreadable", "$storedNote It was left untouched; scan to write a new one.", error = true)
@@ -296,6 +323,7 @@ private fun OverviewSection(
 ) {
     val packageName = report.meta.packageName
     val log = rememberScanLog(packageName, report.generatedAt)
+    val settings by Settings.state.collectAsState()
 
     val permissionWindow = preview(report.permissions)
     val linkWindow = preview(report.deepLinks)
@@ -400,6 +428,7 @@ private fun OverviewSection(
         item {
             ScanLogCard(
                 log = log,
+                historyEnabled = settings.keepHistory,
                 onSeeAll = if (log.size > SCAN_LOG_PREVIEW) {
                     { onSeeAll(SeeAllTarget.SCAN_LOG, "") }
                 } else null,
@@ -427,8 +456,16 @@ private fun ExtractionMetadataCard(report: Report) {
 
 /** Versioned scan log retained in the existing `.hist` file; opening it never rescans. */
 @Composable
-private fun ScanLogCard(log: List<ScanLogEntry>, onSeeAll: (() -> Unit)?) {
+private fun ScanLogCard(log: List<ScanLogEntry>, historyEnabled: Boolean, onSeeAll: (() -> Unit)?) {
     SectionCard("Versioned scan log (${log.size})") {
+        if (!historyEnabled) {
+            Text(
+                "Scan history is turned off in Settings. New scans write a report but no version log, so update-to-update changes cannot be compared.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@SectionCard
+        }
         if (log.isEmpty()) {
             Text(
                 "No retained scan log for this app yet. Each finished scan appends one stamped entry.",
@@ -699,8 +736,10 @@ private fun EvidenceRow(
     onToggleReveal: () -> Unit,
 ) {
     val context = LocalContext.current
+    val settings by Settings.state.collectAsState()
+    val revealAllowed = settings.canRevealSecrets
     // B2: a revealed value must not be screen-capturable while visible.
-    SecureScreen(active = revealed && hasValue)
+    SecureScreen(active = revealed && hasValue && revealAllowed)
     Column(Modifier.padding(top = Space.s)) {
         Text(
             "${evidence.source}@${evidence.offset}",
@@ -716,7 +755,7 @@ private fun EvidenceRow(
             fontFamily = FontFamily.Monospace,
         )
         if (hasValue) {
-            if (revealed) {
+            if (revealed && revealAllowed) {
                 Banner(
                     "Revealed for this visit only",
                     "Full matches stay in memory, are never logged, and reset when you change packages.",
@@ -736,7 +775,15 @@ private fun EvidenceRow(
                     TextAction("Hide value", onToggleReveal)
                 }
             } else {
-                TextAction("Reveal value", onToggleReveal)
+                if (revealAllowed) {
+                    TextAction("Reveal value", onToggleReveal)
+                } else {
+                    Text(
+                        "Reveal is turned off in Settings → Secrets and exports.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         } else if (evidence.snippet.contains("chars hidden")) {
             // A report loaded from disk has no raw value: it only lived in the
@@ -1421,6 +1468,9 @@ private val ExportChoiceSaver: Saver<ExportChoice, Any> =
 private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val settings by Settings.state.collectAsState()
+    // The setting is the ceiling; the dialog's own switch is the per-export opt-in.
+    val sensitiveAllowed = settings.sensitiveExport
     var choice by rememberSaveable(stateSaver = ExportChoiceSaver) { mutableStateOf(ExportChoice()) }
     var confirmSensitive by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
@@ -1471,14 +1521,23 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text("Sensitive export", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "Off: evidence values stay redacted. On: raw retained values are written to the file.",
+                            if (sensitiveAllowed) {
+                                "Off: evidence values stay redacted. On: raw retained values are written to the file."
+                            } else {
+                                "Disabled: \"Include sensitive values in exports\" is off in Settings, so this export is always redacted."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Switch(
-                        checked = choice.sensitive,
-                        onCheckedChange = { on -> if (on) confirmSensitive = true else choice = choice.copy(sensitive = false) },
+                        checked = choice.sensitive && sensitiveAllowed,
+                        enabled = sensitiveAllowed,
+                        onCheckedChange = { on ->
+                            if (sensitiveAllowed) {
+                                if (on) confirmSensitive = true else choice = choice.copy(sensitive = false)
+                            }
+                        },
                         modifier = Modifier.semantics { contentDescription = "Sensitive export" },
                     )
                 }
@@ -1496,7 +1555,7 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                     exporting = true
                     val sections = choice.sections
                     val ext = choice.extension
-                    val sensitive = choice.sensitive
+                    val sensitive = choice.sensitive && sensitiveAllowed
                     exportJob = scope.launch {
                         val result = withContext(Dispatchers.IO) {
                             runCatching { ReportExport.writeFile(context, report, ext, sections, sensitive) }

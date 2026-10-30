@@ -66,6 +66,8 @@ internal fun ToolsPanel(
     onFilter: (AppFilter) -> Unit,
     onScanPackage: (String) -> Unit,
     onScanAll: () -> Unit,
+    scanAllAllowed: Boolean,
+    onPickFile: () -> Unit,
 ) {
     val state = advancedPanelState(packageInput, running, queueActive, appCount, packageError)
     val focusManager = LocalFocusManager.current
@@ -109,11 +111,21 @@ internal fun ToolsPanel(
                 enabled = state.scanPackageEnabled,
                 onSubmit = submit,
             )
+            // File-pick path: works with or without broad package visibility.
             ScanAllRow(
-                enabled = state.scanAllEnabled,
-                subtitle = state.scanAllSubtitle,
-                onClick = onScanAll,
+                enabled = true,
+                subtitle = "Audit an APK picked from storage or shared to FlutterGuard",
+                title = "Scan an APK file",
+                onClick = onPickFile,
             )
+            if (scanAllAllowed) {
+                ScanAllRow(
+                    enabled = state.scanAllEnabled,
+                    subtitle = state.scanAllSubtitle,
+                    title = "Scan all Flutter apps",
+                    onClick = onScanAll,
+                )
+            }
         }
     }
 }
@@ -216,7 +228,7 @@ private fun PackageScanRow(
 
 /** A list row, not a primary button: title + reason + chevron, dimmed when blocked. */
 @Composable
-private fun ScanAllRow(enabled: Boolean, subtitle: String, onClick: () -> Unit) {
+private fun ScanAllRow(enabled: Boolean, subtitle: String, title: String, onClick: () -> Unit) {
     val shape = MaterialTheme.shapes.medium
     Surface(
         // No cyan fill behind it: the row is a row.
@@ -225,7 +237,7 @@ private fun ScanAllRow(enabled: Boolean, subtitle: String, onClick: () -> Unit) 
             .clip(shape)
             // clickable(enabled = false) keeps the "disabled" semantics and blocks
             // the tap, so a blocked row cannot silently do nothing.
-            .clickable(enabled = enabled, onClickLabel = "Scan all Flutter apps", onClick = onClick),
+            .clickable(enabled = enabled, onClickLabel = title, onClick = onClick),
         color = MaterialTheme.colorScheme.surface,
         shape = shape,
     ) {
@@ -235,7 +247,7 @@ private fun ScanAllRow(enabled: Boolean, subtitle: String, onClick: () -> Unit) 
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "Scan all Flutter apps",
+                    title,
                     style = MaterialTheme.typography.titleSmall,
                     color = if (enabled) {
                         MaterialTheme.colorScheme.onSurface

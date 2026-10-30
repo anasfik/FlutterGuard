@@ -56,6 +56,7 @@ object ReportJson {
                 )
             },
             baseSha256 = metaJson.str("baseApkSha256") ?: "",
+            fileScan = metaJson.bool("fileScan"),
         )
 
         val framework = FrameworkInfo(

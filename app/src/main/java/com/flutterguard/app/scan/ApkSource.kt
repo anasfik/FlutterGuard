@@ -24,6 +24,15 @@ class ApkSource(parts: List<ApkPart>) : AutoCloseable {
     private val zips: MutableList<ZipFile> = ArrayList()
     private val roles: List<String> = parts.map { it.role }
 
+    /** The files this source was opened from, in part order (base first). */
+    val files: List<File> = parts.map { it.file }
+
+    /** First part: the base APK or the single picked file. */
+    val primaryFile: File? get() = files.firstOrNull()
+
+    /** Base + split bytes on disk, exactly what [totalApkBytes] reports for an installed app. */
+    fun totalBytes(): Long = files.sumOf { it.length() }
+
     init {
         // A later part failing to open must not leak the zips already opened.
         try {
@@ -197,5 +206,12 @@ class ApkSource(parts: List<ApkPart>) : AutoCloseable {
             }
             return ApkSource(parts)
         }
+
+        /**
+         * File-backed variant: one picked or shared APK with the role "file".
+         * The scanner treats it like a base part, so findings, exports and
+         * history are produced by the same code as an installed-app scan.
+         */
+        fun forFile(file: File): ApkSource = ApkSource(listOf(ApkPart(file, "file")))
     }
 }
