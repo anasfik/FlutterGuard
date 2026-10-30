@@ -21,7 +21,7 @@ object ThirdPartyRules {
     val services = listOf(
         Service("Firebase", files = listOf("google-services.json", "firebase_options"),
             dexPrefixes = listOf("com/google/firebase", "io/flutter/plugins/firebase"),
-            pubPackages = listOf("firebase_core", "firebase_analytics", "firebase_auth", "firebase_messaging", "cloud_firestore"),
+            pubPackages = listOf("firebase_core", "firebase_analytics", "firebase_auth", "firebase_messaging", "cloud_firestore", "firebase_ai", "firebase_vertexai", "firebase_crashlytics", "firebase_remote_config"),
             hosts = listOf("firebaseio.com", "crashlytics.com", "app-measurement.com", "firebaseinstallations.googleapis.com"),
             note = "Google analytics/auth/messaging/crash reporting"),
         Service("Google Play Services", dexPrefixes = listOf("com/google/android/gms"), hosts = listOf("googleapis.com"),
@@ -42,7 +42,7 @@ object ThirdPartyRules {
         Service("Segment", dexPrefixes = listOf("com/segment"), hosts = listOf("segment.io"), note = "CDP/analytics piping"),
         Service("Facebook SDK", dexPrefixes = listOf("com/facebook"), pubPackages = listOf("facebook_app_events", "flutter_facebook_auth"), hosts = listOf("facebook.com", "fbcdn.net"), note = "Auth/events/advertising ID"),
         Service("Bugsnag", dexPrefixes = listOf("com/bugsnag"), hosts = listOf("bugsnag.com"), note = "Crash reporting"),
-        Service("Datadog", dexPrefixes = listOf("com/datadog"), hosts = listOf("datadoghq.com"), note = "RUM/monitoring"),
+        Service("Datadog", dexPrefixes = listOf("com/datadog"), pubPackages = listOf("datadog_flutter_plugin", "datadog_flutter_plugin_flutterflow"), hosts = listOf("datadoghq.com"), note = "RUM/monitoring"),
         Service("AppDynamics/NewRelic", dexPrefixes = listOf("com/newrelic"), hosts = listOf("nr-data.net"), note = "APM"),
         Service("PostHog", dexPrefixes = listOf("com/posthog"), pubPackages = listOf("posthog_flutter"), hosts = listOf("posthog.com"), note = "Product analytics"),
         Service("Mapbox", dexPrefixes = listOf("com/mapbox"), pubPackages = listOf("mapbox_gl", "mapbox_maps_flutter"), hosts = listOf("mapbox.com", "tiles.mapbox.com"), note = "Maps/tiles"),
@@ -212,6 +212,49 @@ object ThirdPartyRules {
         Service("Camera/ML Kit", dexPrefixes = listOf("com/google/mlkit"), pubPackages = listOf("google_mlkit_text_recognition", "camera"), note = "Camera/on-device ML"),
         Service("Share/receive", pubPackages = listOf("receive_sharing_intent", "share_plus", "share_handler"), note = "Inbound data from other apps"),
         Service("URL launcher", pubPackages = listOf("url_launcher"), note = "Outbound intent surface"),
+        // ---- modern Flutter runtime surface ----
+        // Reached by studying the top-downloaded Flutter packages: these are the
+        // ones that carry a real security story but that no vendor fingerprint
+        // covered. Generic plumbing (dio, http, riverpod, go_router) is left out
+        // on purpose - it names no third party.
+        Service(
+            "Genkit (Dart AI agents)",
+            pubPackages = listOf("genkit", "genkit_google_genai", "genkit_anthropic", "genkit_openai", "genkit_middleware"),
+            note = "Agentic AI orchestration; prompt templates and tool definitions ship inside the app",
+        ),
+        Service(
+            "Dart FFI / JNI bridge",
+            pubPackages = listOf("jni", "jni_flutter", "objective_c", "jnigen"),
+            dexPrefixes = listOf("com/github/dart_lang/jni"),
+            note = "Native code called from Dart; memory-safety and ABI bugs are reachable from here",
+        ),
+        Service(
+            "Multicast DNS / LAN discovery",
+            pubPackages = listOf("multicast_dns", "nsd", "bonsoir", "flutter_nsd"),
+            note = "Finds devices on the local network; exposes peer identity and service names",
+        ),
+        Service(
+            "Crypto primitives (PointyCastle)",
+            pubPackages = listOf("pointycastle", "cryptography", "cryptography_flutter", "encrypt"),
+            note = "Cryptography implemented in Dart; check mode, padding and key handling",
+        ),
+        Service(
+            "Location services",
+            pubPackages = listOf("geolocator", "location", "flutter_background_geolocation"),
+            hosts = listOf("maps.googleapis.com"),
+            note = "Precise location access",
+        ),
+        Service(
+            "Local notifications",
+            pubPackages = listOf("flutter_local_notifications", "awesome_notifications"),
+            dexPrefixes = listOf("com/dexterous/flutterlocalnotifications"),
+            note = "Notification surface, including full-screen and action intents",
+        ),
+        Service(
+            "Device capture and playback",
+            pubPackages = listOf("image_picker", "file_picker", "video_player", "just_audio", "record", "camera"),
+            note = "Reads user files, camera and microphone",
+        ),
     )
 
     private val dexPrefixToService = services.flatMap { s -> s.dexPrefixes.map { it to s.name } }
