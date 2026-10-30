@@ -35,6 +35,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Dev-suffixed package: installs side by side with the signed release so the
+            // detector changes can be exercised on a real device without touching the
+            // release signing identity the shipped APK already has.
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+        }
         release {
             isMinifyEnabled = false
             // lintVital needs the lint-gradle artifact; skip it for offline release builds.

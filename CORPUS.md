@@ -270,3 +270,44 @@ surface that no host-based rule can see.
 All of it is static, offline and evidence-only: a matched host proves the string is in
 the APK, not that the app calls it; a matched key is a key-shaped string, not a verified
 credential.
+
+## Device verification of the gap fixes
+
+Recorded 2026-10-30 on the physical device (Redmi Note 9 Pro, LineageOS, API 35), using a
+side-by-side `com.flutterguard.app.dev` build so the signed release on the device was untouched.
+Target: `app.cogwheel.conduit` — Conduit, the densest provider surface in the corpus.
+
+| | before the fixes | after |
+|---|---|---|
+| third-party services reported | 15 | 28 |
+| AI providers reported | 4 | 17 |
+| provider hosts in the report | 4 | 23 |
+
+The four providers found before were OpenAI, OpenRouter, HuggingFace and Ollama/LM Studio. The
+17 found after are OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek, Groq, Mistral, Cohere,
+Together AI, Fireworks AI, Perplexity, xAI, HuggingFace, Alibaba Qwen/DashScope, Moonshot,
+Zhipu GLM and Ollama/LM Studio — matching the 22 endpoint strings measured on the host.
+
+### The gap the device run exposed
+
+`SecretScanner` only harvested hosts out of strings that contained `://`. A Dart AOT snapshot
+usually stores a provider base URL as a plain string, so `api.anthropic.com` sat in `libapp.so`
+invisible while `https://api.anthropic.com/v1/messages` would have been caught. The fix is a
+fixed-suffix host matcher with a lookbehind, so `myopenai.com` is not mistaken for `openai.com`;
+it is a closed list of provider domains, not a generic FQDN scan, and it is covered by four
+regression tests.
+
+### Still unattributed
+
+`api.cerebras.ai`, `api.novita.ai`, `api.poe.com`, `open.bigmodel.cn` and the three
+`dashscope.aliyuncs.com` variants are now harvested as hosts, but no service entry names them
+individually, so they appear in the host list rather than as a named provider. Naming them is a
+data edit in `ThirdPartyRules.services`, not a detector change.
+
+### Cost of a scan on this size of app
+
+Conduit takes about five minutes end to end, roughly 2m45s of it inside the single-threaded
+string sweep of the 38 MB `libapp.so`. That stage emits one progress line for all native
+libraries, so it looks stalled while it works. Per-library progress and a cheaper sweep for very
+large AOT snapshots are the next performance items; they are pre-existing, not caused by the
+detector additions.

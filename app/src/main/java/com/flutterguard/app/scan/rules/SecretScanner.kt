@@ -10,6 +10,25 @@ import com.flutterguard.app.scan.parsers.X509
 /** Which artifact layer a string came from — cheap gating keeps big apps fast. */
 enum class Layer { DEX, SO, ASSET, ARSC, KERNEL }
 
+/**
+ * LLM/provider hosts as they appear in a Dart string table, usually with no
+ * scheme: `api.anthropic.com` sits alone in the AOT snapshot, so the URL
+ * harvest in [SecretScanner.feed] never sees it. A fixed suffix list keeps this
+ * cheap — it is not a generic FQDN scan.
+ */
+private val providerHostRegex = Regex(
+    "(?i)(?<![a-z0-9.\\-])(?:[a-z0-9\\-]{1,40}\\.)*(?:" +
+        "anthropic\\.com|openai\\.com|openai\\.azure\\.com|deepseek\\.com|groq\\.com|" +
+        "openrouter\\.ai|generativelanguage\\.googleapis\\.com|huggingface\\.co|" +
+        "mistral\\.ai|together\\.xyz|fireworks\\.ai|perplexity\\.ai|cohere\\.ai|" +
+        "cerebras\\.ai|novita\\.ai|sambanova\\.ai|moonshot\\.cn|bigmodel\\.cn|" +
+        "minimax(?:chat|i)\\.com|elevenlabs\\.io|stability\\.ai|poe\\.com|" +
+        "replicate\\.com|voyageai\\.com|jina\\.ai|deepinfra\\.com|anyscale\\.com|" +
+        "lepton\\.ai|hyperbolic\\.xyz|dashscope\\.aliyuncs\\.com|" +
+        "bedrock-runtime\\.[a-z0-9\\-]+\\.amazonaws\\.com|x\\.ai|nvidia\\.com" +
+        ")",
+)
+
 data class SecretRule(
     val id: String,
     val title: String,
@@ -288,6 +307,19 @@ class SecretScanner(private val appTokens: Set<String> = emptySet()) {
                     hostClass[host] = classify(host, url)
                     addSample(host, url)
                 }
+            }
+        }
+
+        // ---- provider hosts with no scheme ----
+        // Same hosts, matched without a URL around them. This is what makes an
+        // LLM provider visible in an app that only ever stores its base URL as a
+        // plain string, which is the common case for Dart AOT snapshots.
+        if (lower != null && hostSeen.size <= 6000) {
+            for (m in providerHostRegex.findAll(raw)) {
+                val host = m.value.lowercase()
+                if (!hostSeen.add(host)) continue
+                hostClass[host] = classify(host, "https://$host")
+                addSample(host, "https://$host")
             }
         }
 
