@@ -57,6 +57,40 @@ class DetailPhaseTest {
     }
 
     @Test
+    fun aFileScanNeverAnswersForTheInstalledAppOfTheSamePackage() {
+        // Same package name, different namespace: the in-memory fast path must
+        // not hand a picked APK's report to the installed app's route, or the
+        // other way round. Otherwise the `.file` namespace is bypassed in RAM.
+        val fileDone = ScanPhase.Done(ScanJob(9, "com.a", 0), report("file").copy(
+            meta = report("file").meta.copy(fileScan = true),
+        ), "/tmp/a.file.json")
+        val installedStored = report("installed")
+
+        assertEquals(
+            "installed",
+            DetailPhase.report(fileDone, null, "com.a", installedStored, fileScan = false)?.meta?.label,
+        )
+        val fileStored = installedStored.copy(meta = installedStored.meta.copy(fileScan = true))
+        assertEquals(
+            "file",
+            DetailPhase.report(fileDone, null, "com.a", fileStored, fileScan = true)?.meta?.label,
+            )
+        // A stored report of the other namespace is not a fallback either: the
+        // caller resolves the file itself, so a namespace mismatch reads as none.
+        assertEquals(
+            "installed",
+            DetailPhase.report(
+                ScanPhase.Idle,
+                fileDone,
+                "com.a",
+                installedStored,
+                fileScan = false,
+            )?.meta?.label,
+        )
+        assertTrue(fileDone.report.meta.fileScan)
+    }
+
+    @Test
     fun anotherPackagesScanDoesNotBlankTheReport() {
         assertEquals(DetailPane.REPORT, DetailPhase.pane(otherRunning, "com.a", hasReport = true))
         assertEquals(DetailPane.OTHER_SCAN, DetailPhase.pane(otherRunning, "com.a", hasReport = false))

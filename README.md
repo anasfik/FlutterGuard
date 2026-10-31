@@ -139,7 +139,8 @@ stalling the queue.
 ```bash
 adb shell am start -n com.flutterguard.app/.MainActivity -e scan com.example.app
 adb logcat -d | grep FG_REPORT
-adb pull /sdcard/Android/data/com.flutterguard.app/files/reports/com_example_app.json
+# Reports live in internal storage; pull one from a debug build (release builds are not debuggable).
+adb exec-out run-as com.flutterguard.app cat files/reports/com_example_app.json > com_example_app.json
 ```
 
 A `<package>.hist` snapshot is written next to every report; it is what powers the diff.

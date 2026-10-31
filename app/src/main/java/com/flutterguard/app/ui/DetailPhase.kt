@@ -14,15 +14,28 @@ enum class DetailPane { NOT_STARTED, PROGRESS, OTHER_SCAN, REPORT, FAILURE }
  */
 object DetailPhase {
 
-    /** Live job of this package, then the last success of this process, then the stored report. */
+    /**
+     * Live job of this package, then the last success of this process, then the
+     * stored report.
+     *
+     * [fileScan] is part of the identity, not a hint: a finished scan of a
+     * picked APK and the installed app of the same package name are different
+     * artefacts, and showing one under the other's name is exactly the
+     * confusion the `.file` namespace exists to prevent.
+     */
     fun report(
         phase: ScanPhase,
         lastSuccess: ScanPhase.Done?,
         packageName: String,
         stored: Report?,
+        fileScan: Boolean = false,
     ): Report? {
-        val live = (phase as? ScanPhase.Done)?.takeIf { it.job.packageName == packageName }?.report
-        val retained = lastSuccess?.takeIf { it.job.packageName == packageName }?.report
+        val live = (phase as? ScanPhase.Done)
+            ?.takeIf { it.job.packageName == packageName && it.report.meta.fileScan == fileScan }
+            ?.report
+        val retained = lastSuccess
+            ?.takeIf { it.job.packageName == packageName && it.report.meta.fileScan == fileScan }
+            ?.report
         return live ?: retained ?: stored
     }
 

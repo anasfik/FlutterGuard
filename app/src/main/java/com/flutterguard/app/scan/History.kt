@@ -105,7 +105,7 @@ data class ScanLogEntry(
  * Versioned per-app scan log stored inside the existing `.hist` file: blocks
  * separated by a marker, oldest first, bounded to [MAX_ENTRIES]. It is the same
  * atomic [ReportFiles] write, not a second persistence layer, and it is plain
- * text so `adb pull` keeps working.
+ * text so an exported or pulled report stays readable by hand.
  */
 object ScanLog {
 

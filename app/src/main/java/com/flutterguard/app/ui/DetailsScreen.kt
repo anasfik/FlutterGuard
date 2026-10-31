@@ -115,6 +115,8 @@ internal val DetailsSections = listOf("Overview", "Findings", "Explore")
 internal fun DetailsScreen(
     app: InstalledApp?,
     packageName: String,
+    /** True for a picked/shared APK, whose report has its own on-disk namespace. */
+    fileScan: Boolean,
     phase: ScanPhase,
     lastSuccess: ScanPhase.Done?,
     section: String,
@@ -125,17 +127,21 @@ internal fun DetailsScreen(
     onCancel: () -> Unit,
 ) {
     val mine = phase.packageName == packageName
-    val done = (phase as? ScanPhase.Done)?.takeIf { mine }
-    val retained = lastSuccess?.takeIf { it.job.packageName == packageName }
+    // Same package, same namespace: a file scan's report and diff must never be
+    // rendered as the installed app's (and the reverse).
+    val done = (phase as? ScanPhase.Done)?.takeIf { mine && it.report.meta.fileScan == fileScan }
+    val retained = lastSuccess?.takeIf {
+        it.job.packageName == packageName && it.report.meta.fileScan == fileScan
+    }
 
     // A1: a finished report is read back from disk, so navigation and process
     // death do not lose it. The live job and this process's last success are
     // still the fast path (DetailPhase picks the order).
-    val stored = rememberStoredReport(packageName)
+    val stored = rememberStoredReport(packageName, fileScan)
     val storedReport = (stored as? StoredReport.Loaded)?.report
     val storedFailure = (stored as? StoredReport.Unreadable)?.message
 
-    val report = DetailPhase.report(phase, lastSuccess, packageName, storedReport)
+    val report = DetailPhase.report(phase, lastSuccess, packageName, storedReport, fileScan)
     val settings by Settings.state.collectAsState()
     // A prompt only: nothing scans in the background. Off by default, so an
     // untouched install behaves exactly as before.
@@ -322,7 +328,7 @@ private fun OverviewSection(
     listState: LazyListState,
 ) {
     val packageName = report.meta.packageName
-    val log = rememberScanLog(packageName, report.generatedAt)
+    val log = rememberScanLog(packageName, report.generatedAt, report.meta.fileScan)
     val settings by Settings.state.collectAsState()
 
     val permissionWindow = preview(report.permissions)
@@ -524,12 +530,18 @@ private fun themeDiffColor(line: String): Color = when (line.firstOrNull()) {
 
 /** Reads the retained log on IO; refreshing the report or package reloads it. */
 @Composable
-internal fun rememberScanLog(packageName: String, generatedAt: Long): List<ScanLogEntry> {    val context = LocalContext.current
+internal fun rememberScanLog(
+    packageName: String,
+    generatedAt: Long,
+    /** True for a picked/shared APK: its log is not the installed app's log. */
+    fileScan: Boolean = false,
+): List<ScanLogEntry> {
+    val context = LocalContext.current
     var entries by remember(packageName) { mutableStateOf<List<ScanLogEntry>>(emptyList()) }
     LaunchedEffect(packageName, generatedAt) {
         entries = withContext(Dispatchers.IO) {
             runCatching {
-                val file = ReportFiles.historyFile(ReportFiles.appDir(context), packageName)
+                val file = ReportFiles.historyFile(ReportFiles.appDir(context), packageName, fileScan)
                 ScanLog.decode(if (file.isFile) file.readText() else null)
             }.getOrDefault(emptyList())
         }

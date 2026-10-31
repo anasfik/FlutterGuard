@@ -102,11 +102,16 @@ object ManifestRules {
             if (node.name == "uses-permission") facts.requestedPermissions.add(name)
             val protection = try {
                 val pi = pm.getPermissionInfo(name, 0)
-                when (pi.protection and 0xF) {
-                    2 -> if (pi.protection and 0x10 != 0) "signature|privileged" else "signature"
+                // Read the field, not `getProtection()`. The getter only exists from
+                // API 28 and minSdk is 26, so on Android 8.0/8.1 it throws
+                // NoSuchMethodError — an Error, which the catch below does not cover.
+                @Suppress("DEPRECATION")
+                val level = pi.protectionLevel
+                when (level and 0xF) {
+                    2 -> if (level and 0x10 != 0) "signature|privileged" else "signature"
                     3 -> "dangerous"
                     4 -> "normal"
-                    else -> "protection=0x${pi.protection.toString(16)}"
+                    else -> "protection=0x${level.toString(16)}"
                 }
             } catch (_: Exception) {
                 "custom/unknown"

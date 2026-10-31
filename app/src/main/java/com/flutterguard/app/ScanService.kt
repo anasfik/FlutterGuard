@@ -24,6 +24,7 @@ import com.flutterguard.app.scan.ScanJob
 import com.flutterguard.app.scan.ScanStore
 import com.flutterguard.app.scan.ScanToken
 import com.flutterguard.app.scan.Scanner
+import com.flutterguard.app.ui.ScanNotifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -162,6 +163,9 @@ class ScanService : Service() {
         val dir = ReportFiles.appDir(this)
         val settings = com.flutterguard.app.settings.Settings.snapshot(this)
         var stage = "Reading package info"
+        // True once a full report is on disk: an abandonment that lands after the
+        // write must not leave an "interrupted" marker for a package that has one.
+        var savedOk = false
         val onProgress: (String, Int) -> Unit = { step, pct ->
             if (!token.isAbandoned) {
                 stage = step
@@ -171,14 +175,18 @@ class ScanService : Service() {
             }
         }
         val isCancelled: () -> Boolean = { token.isAbandoned || ScanStore.isCancelled(job.id) }
+        // A picked/shared APK is stored in its own namespace: the installed app with
+        // the same package name keeps its verdict, report and version log. Declared
+        // outside the try so the finally block clears the same marker it set.
+        val fileScan = file != null
         try {
             val previous: String?
             val report: Report
             if (file != null) {
                 // File scan: the manifest identity was resolved before the service
-                // started, so report/history storage matches an installed-app scan.
-                ReportFiles.markInflight(dir, packageName)
-                previous = if (settings.keepHistory) ReportFiles.previousHistory(dir, packageName) else null
+                // started, so the report still records the package it declared.
+                ReportFiles.markInflight(dir, packageName, fileScan)
+                previous = if (settings.keepHistory) ReportFiles.previousHistory(dir, packageName, true) else null
                 report = Scanner.scanFile(this, file, onProgress, isCancelled)
             } else {
                 val app = try {
@@ -189,7 +197,7 @@ class ScanService : Service() {
                     return
                 }
 
-                ReportFiles.markInflight(dir, packageName)
+                ReportFiles.markInflight(dir, packageName, fileScan)
                 previous = if (settings.keepHistory) ReportFiles.previousHistory(dir, packageName) else null
 
                 report = Scanner.scan(
@@ -207,7 +215,9 @@ class ScanService : Service() {
             val saved = ReportFiles.save(
                 dir, packageName, json, History.snapshot(report),
                 writeHistory = settings.keepHistory,
+                fileScan = fileScan,
             )
+            savedOk = true
             if (token.isAbandoned) return
             val diff = previous?.let {
                 runCatching { History.diff(it, History.snapshot(report)) }.getOrDefault(emptyList())
@@ -225,8 +235,9 @@ class ScanService : Service() {
         } catch (t: Throwable) {
             if (!token.isAbandoned) fail(job, token, "${t.message ?: t::class.java.simpleName} (stage: $stage)")
         } finally {
-            // Keep the marker of an abandoned scan: it is the interruption signal.
-            if (!token.isAbandoned) ReportFiles.clearInflight(dir, packageName)
+            // Keep the marker of an abandoned scan: it is the interruption signal —
+            // unless the report was already written, in which case it would be a lie.
+            if (!token.isAbandoned || savedOk) ReportFiles.clearInflight(dir, packageName, fileScan)
             // The cache copy exists only for this job; an abandoned job also drops it.
             if (file != null) runCatching { file.delete() }
             if (activeFile === file) activeFile = null
@@ -322,7 +333,7 @@ class ScanService : Service() {
             ServiceCompat.startForeground(this, NOTIF_ID, notification, foregroundType())
             foregroundStarted = true
         } else {
-            runCatching { NotificationManagerCompat.from(this).notify(NOTIF_ID, notification) }
+            ScanNotifier.post(this, NOTIF_ID, notification)
         }
     }
 
@@ -337,7 +348,6 @@ class ScanService : Service() {
         if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
 
     private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT < 26) return
         val nm = getSystemService(NotificationManager::class.java) ?: return
         if (nm.getNotificationChannel(CHANNEL_ID) != null) return
         nm.createNotificationChannel(

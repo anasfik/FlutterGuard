@@ -126,6 +126,20 @@ class FileScanPathTest {
     }
 
     @Test
+    fun aPackageNameThatCouldBreakARouteIsRefused() {
+        fun manifest(pkg: String) = AxmlNode("manifest").apply { attrs["package"] = pkg }
+        // The separator Nav.kt joins fields with: accepted, it would forge a
+        // second route field and land on the installed app after a restart.
+        assertNull(Scanner.fileMeta(manifest("com.example.app\u001Ftrue"), "x"))
+        assertNull(Scanner.fileMeta(manifest("com"), "x"))
+        assertNull(Scanner.fileMeta(manifest("9com.example"), "x"))
+        assertNull(Scanner.fileMeta(manifest("com..example"), "x"))
+        assertEquals("com.example", Scanner.fileMeta(manifest("com.example"), "x")?.packageName)
+        assertEquals("com.example.app", Scanner.fileMeta(manifest("com.example.app"), "x")?.packageName)
+        assertEquals("com.example_app.a1", Scanner.fileMeta(manifest("com.example_app.a1"), "x")?.packageName)
+    }
+
+    @Test
     fun fileScanReportsAreLabelledAndDecodeBack() {
         val meta = AppMeta(
             "com.picked.app", "Picked App", "2.4.0", 240, 26, 36, null, 0, 0, false, 0, 0,

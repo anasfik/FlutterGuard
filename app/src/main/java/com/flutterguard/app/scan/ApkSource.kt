@@ -143,19 +143,30 @@ class ApkSource(parts: List<ApkPart>) : AutoCloseable {
 
     fun stream(name: String): InputStream? = entry(name)?.let { (z, e) -> z.getInputStream(e) }
 
+    /**
+     * Bounded read of one entry. The buffer grows as bytes actually arrive: a
+     * hostile APK can declare a 96 MB entry in its central directory, and sizing
+     * the array from that number would be OOM-killed before anything is read.
+     * Over [maxBytes] returns null, which callers already treat as "skip".
+     */
     fun bytes(name: String, maxBytes: Int = 64 * 1024 * 1024): ByteArray? {
         val (z, e) = entry(name) ?: return null
-        val expected = e.size
-        if (expected < 0 || expected > maxBytes) return null
+        if (e.size > maxBytes) return null
+        // An entry that under-declares its size must not grow to the caller's
+        // cap: either its own number is the truth, or it is lying and is skipped.
+        val limit = if (e.size in 1..maxBytes) e.size.toInt() else maxBytes
         return z.getInputStream(e).use { ins ->
-            val buf = ByteArray(expected.toInt())
-            var off = 0
-            while (off < buf.size) {
-                val n = ins.read(buf, off, buf.size - off)
+            val out = java.io.ByteArrayOutputStream(minOf(limit, 1 shl 20))
+            val buf = ByteArray(64 * 1024)
+            var total = 0
+            while (true) {
+                val n = ins.read(buf)
                 if (n <= 0) break
-                off += n
+                total += n
+                if (total > limit) return null
+                out.write(buf, 0, n)
             }
-            if (off == buf.size) buf else buf.copyOf(off)
+            out.toByteArray()
         }
     }
 

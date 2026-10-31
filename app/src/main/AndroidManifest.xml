@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Core capability: see every installed app. No INTERNET permission:
-         FlutterGuard never transmits anything it analyzes. -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+         FlutterGuard never transmits anything it analyzes.
+         Deliberate, Play-declared use: this app is a security/inventory tool and
+         the permission is granted by the user's own first-run disclosure before
+         the inventory is ever read. Suppressed as a lint error on purpose; the
+         Play permissions declaration is the control that applies here. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <!-- Scan execution runs in a dataSync foreground service: local, on-device
          file processing (Android service-type docs list file processing here).
          Android 14+ requires both the generic and the typed permission. -->
@@ -18,6 +25,8 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        tools:ignore="DataExtractionRules"
         android:supportsRtl="true"
         android:theme="@style/Theme.FlutterGuard">
 
@@ -35,6 +44,8 @@
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/vnd.android.package-archive" />
+                <!-- Some file managers label an APK as a plain zip. -->
+                <data android:mimeType="application/zip" />
             </intent-filter>
         </activity>
 

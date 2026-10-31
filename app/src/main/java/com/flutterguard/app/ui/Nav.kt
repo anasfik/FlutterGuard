@@ -18,13 +18,25 @@ sealed interface Destination {
     data class Details(
         val packageName: String,
         val section: String = DetailsSections.first(),
+        /**
+         * True when this route is a picked or shared APK. Such a report lives in
+         * its own `.file` namespace, so the route has to remember which one it
+         * is: a cold start otherwise resolves the package to the *installed*
+         * app's report and shows a clean verdict for a hostile APK.
+         */
+        val fileScan: Boolean = false,
     ) : Destination
 
-    /** A See-all list. [filter] is the section's own filter at the moment it was opened. */
+    /**
+     * A See-all list. [filter] is the section's own filter at the moment it was
+     * opened, and [fileScan] says which of the package's reports the list is
+     * drawn from (see [Details.fileScan]).
+     */
     data class Section(
         val packageName: String,
         val target: SeeAllTarget,
         val filter: String = "",
+        val fileScan: Boolean = false,
     ) : Destination
 
     /**
@@ -83,8 +95,9 @@ object NavStack {
         Destination.Queue -> "queue"
         Destination.Settings -> "settings"
         is Destination.Legal -> "legal\u001F${destination.doc}"
-        is Destination.Details -> "details\u001F${destination.packageName}"
-        is Destination.Section -> "section\u001F${destination.packageName}\u001F${destination.target.name}"
+        is Destination.Details -> "details\u001F${destination.packageName}\u001F${destination.fileScan}"
+        is Destination.Section ->
+            "section\u001F${destination.packageName}\u001F${destination.target.name}\u001F${destination.fileScan}"
     }
 
     fun save(stack: List<Destination>): List<String> = stack.map(::encode)
@@ -100,28 +113,41 @@ object NavStack {
         Destination.Queue -> "queue"
         Destination.Settings -> "settings"
         is Destination.Legal -> "legal$SEP${destination.doc}"
-        is Destination.Details -> "details$SEP${destination.packageName}$SEP${destination.section}"
+        is Destination.Details ->
+            "details$SEP${destination.packageName}$SEP${destination.section}$SEP${destination.fileScan}"
         is Destination.Section ->
-            "section$SEP${destination.packageName}$SEP${destination.target.name}$SEP${destination.filter}"
+            "section$SEP${destination.packageName}$SEP${destination.target.name}$SEP" +
+                "${destination.fileScan}$SEP${destination.filter}"
     }
 
     /** Null for anything unrecognised, so a corrupt save degrades to Home instead of crashing. */
     fun decode(raw: String): Destination? {
-        // limit = 4 keeps the filter intact even if it contains the separator.
-        val parts = raw.split(SEP, limit = 4)
+        // limit = 5 keeps the trailing filter intact even if it contains the
+        // separator. A save written before sections carried their namespace has
+        // four fields, so `fileScan` is absent and the filter reads as empty.
+        val parts = raw.split(SEP, limit = 5)
         return when (parts[0]) {
             "home" -> Destination.Home
             "queue" -> Destination.Queue
             "settings" -> Destination.Settings
             "legal" -> parts.getOrNull(1)?.takeIf { it in LegalDocs.names }?.let { Destination.Legal(it) }
             "details" -> parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { packageName ->
-                Destination.Details(packageName, parts.getOrNull(2).orEmpty().ifBlank { DetailsSections.first() })
+                Destination.Details(
+                    packageName = packageName,
+                    section = parts.getOrNull(2).orEmpty().ifBlank { DetailsSections.first() },
+                    fileScan = parts.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
+                )
             }
             "section" -> {
                 val packageName = parts.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return null
                 val target = parts.getOrNull(2)?.let { name -> SeeAllTarget.entries.firstOrNull { it.name == name } }
                     ?: return null
-                Destination.Section(packageName, target, parts.getOrNull(3).orEmpty())
+                Destination.Section(
+                    packageName = packageName,
+                    target = target,
+                    filter = parts.getOrNull(4).orEmpty(),
+                    fileScan = parts.getOrNull(3)?.toBooleanStrictOrNull() ?: false,
+                )
             }
             else -> null
         }

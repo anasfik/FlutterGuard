@@ -171,7 +171,7 @@ pull the JSON, diff against the previous `.hist`:
 ```bash
 adb shell am start -n com.flutterguard.app/.MainActivity -e scan com.gopeed.gopeed
 adb logcat -d | grep FG_REPORT
-adb pull /sdcard/Android/data/com.flutterguard.app/files/reports/com_gopeed_gopeed.json
+adb exec-out run-as com.flutterguard.app cat files/reports/com_gopeed_gopeed.json > com_gopeed_gopeed.json
 ```
 
 Note for future fetches: the latest release assets of FlClash, PiliPlus,

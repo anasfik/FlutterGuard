@@ -143,7 +143,156 @@ class ReportFilesTest {
     )
 
     @Test
-    fun inflightMarkerIdentifiesAnInterruptedScan() {        val dir = createTempDir("fg-inflight")
+    fun aFileScanNeverOverwritesTheInstalledAppsReportOrHistory() {
+        // A shared/picked APK can declare any package name. Writing it to the
+        // installed app's slot would silently replace the verdict the researcher
+        // already has for the app on the device — data loss, not a cosmetic bug.
+        val dir = createTempDir("fg-file-namespace")
+        try {
+            ReportFiles.save(dir, "com.whatsapp", "{\"installed\":true}", "version:1")
+            val installedJson = ReportFiles.jsonFile(dir, "com.whatsapp")
+            val installedHist = ReportFiles.historyFile(dir, "com.whatsapp")
+
+            val forged = ReportFiles.save(
+                dir, "com.whatsapp", "{\"forged\":true}", "version:9", fileScan = true,
+            )
+
+            assertFalse("a file scan must not target the installed report", forged.json == installedJson)
+            assertEquals("{\"installed\":true}", installedJson.readText())
+            assertEquals(1, ScanLog.decode(installedHist.readText()).size)
+            assertEquals("{\"forged\":true}", forged.json.readText())
+            // The forged APK must not inherit the installed app's version log.
+            assertEquals("version:9", ReportFiles.previousHistory(dir, "com.whatsapp", fileScan = true))
+            assertEquals(installedHist.readText(), ReportFiles.previousHistory(dir, "com.whatsapp"))
+            assertFalse(installedHist.readText().contains("version:9"))
+            // Delete-all still removes both namespaces.
+            assertEquals(4, ReportFiles.deleteAll(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun legacyExternalReportsMoveIntoPrivateStorage() {
+        val legacy = createTempDir("fg-legacy")
+        val current = File(createTempDir("fg-current"), "reports")
+        try {
+            val report = File(legacy, "com_example_app.json").apply { writeText("{\"old\":true}") }
+            val hist = File(legacy, "com_example_app.hist").apply { writeText("version:1") }
+            File(legacy, "com_example_app.json.tmp").apply { writeText("partial") }
+
+            assertEquals(2, ReportFiles.moveReports(legacy, current))
+
+            assertEquals("{\"old\":true}", File(current, report.name).readText())
+            assertEquals("version:1", File(current, hist.name).readText())
+            assertFalse(report.exists())
+            assertFalse(hist.exists())
+
+            // A report the new build already wrote wins; the stale copy is dropped.
+            File(current, "com_other.json").writeText("{\"new\":true}")
+            File(legacy, "com_other.json").writeText("{\"old\":true}")
+            assertEquals(1, ReportFiles.moveReports(legacy, current))
+            assertEquals("{\"new\":true}", File(current, "com_other.json").readText())
+            assertFalse(File(legacy, "com_other.json").exists())
+        } finally {
+            legacy.deleteRecursively()
+            current.parentFile?.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun aFileScanNeverResolvesToTheInstalledAppsStoredReport() {
+        // org.json is stubbed in JVM tests, so this asserts the file the read path
+        // picks, which is the part that can silently show the wrong app's verdict.
+        val dir = createTempDir("fg-readnamespace")
+        try {
+            ReportFiles.save(dir, "com.whatsapp", "{\"installed\":true}", "version:1")
+            // A stored report is present (decode needs org.json, absent on the JVM,
+            // so it reads back as Unreadable — the point is that it is not Missing).
+            assertTrue(ReportFiles.load(dir, "com.whatsapp") !is StoredReport.Missing)
+            // No picked-APK report yet: it must be Missing, never the installed one.
+            assertTrue(
+                ReportFiles.load(dir, "com.whatsapp", fileScan = true) is StoredReport.Missing,
+            )
+            assertFalse(
+                ReportFiles.jsonFile(dir, "com.whatsapp", true) ==
+                    ReportFiles.jsonFile(dir, "com.whatsapp"),
+            )
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun aTruncatedMigrationTargetIsReplacedByTheLegacyCopy() {
+        val legacy = createTempDir("fg-legacy-trunc")
+        val current = File(createTempDir("fg-current-trunc"), "reports").apply { mkdirs() }
+        try {
+            // A crash mid-copy can leave a zero-length target: never mistake it for
+            // a finished report and delete the only good copy.
+            File(current, "com_example_app.json").writeText("")
+            File(legacy, "com_example_app.json").writeText("{\"old\":true}")
+
+            assertEquals(1, ReportFiles.moveReports(legacy, current))
+
+            assertEquals("{\"old\":true}", File(current, "com_example_app.json").readText())
+            assertFalse(File(legacy, "com_example_app.json").exists())
+            assertEquals(
+                emptyList<String>(),
+                current.listFiles()!!.map { it.name }.filter { it.endsWith(".tmp") },
+            )
+        } finally {
+            legacy.deleteRecursively()
+            current.parentFile?.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun anOversizedLegacyFileIsDroppedInsteadOfLeftInSharedStorage() {
+        val legacy = createTempDir("fg-legacy-big")
+        val current = File(createTempDir("fg-current-big"), "reports").apply { mkdirs() }
+        try {
+            // 9 MB: bigger than any report we write, so it is not ours to keep.
+            File(legacy, "com_huge.json").writeBytes(ByteArray(9 * 1024 * 1024))
+            // One legacy file cleared: dropped, not copied.
+            assertEquals(1, ReportFiles.moveReports(legacy, current))
+            assertFalse("an oversized legacy report must not survive", File(legacy, "com_huge.json").exists())
+            assertFalse(File(current, "com_huge.json").exists())
+
+            // An unrelated file is left alone: it is not ours.
+            File(legacy, "notes.txt").writeText("keep me")
+            ReportFiles.moveReports(legacy, current)
+            assertTrue(File(legacy, "notes.txt").exists())
+        } finally {
+            legacy.deleteRecursively()
+            current.parentFile?.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun inflightMarkersAreNamespacedToo() {
+        val dir = createTempDir("fg-inflight-ns")
+        try {
+            ReportFiles.markInflight(dir, "com.example.app")
+            ReportFiles.markInflight(dir, "com.example.app", fileScan = true)
+            // Two markers on disk, one entry for the banner: the content is the
+            // bare package name in both namespaces and `interrupted` de-duplicates.
+            assertEquals(listOf("com.example.app"), ReportFiles.interrupted(dir))
+            assertTrue(ReportFiles.inflightFile(dir, "com.example.app").exists())
+            assertTrue(ReportFiles.inflightFile(dir, "com.example.app", fileScan = true).exists())
+            // Clearing one namespace leaves the other's scan still marked.
+            ReportFiles.clearInflight(dir, "com.example.app", fileScan = true)
+            assertFalse(ReportFiles.inflightFile(dir, "com.example.app", fileScan = true).exists())
+            assertTrue(ReportFiles.inflightFile(dir, "com.example.app").exists())
+            assertEquals(listOf("com.example.app"), ReportFiles.interrupted(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun inflightMarkerIdentifiesAnInterruptedScan() {
+        val dir = createTempDir("fg-inflight")
         try {
             ReportFiles.markInflight(dir, "com.example.app")
             ReportFiles.markInflight(dir, "com.other.app")

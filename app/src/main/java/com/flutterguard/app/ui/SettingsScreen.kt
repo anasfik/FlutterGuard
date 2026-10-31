@@ -67,6 +67,8 @@ internal fun SettingsScreen(
     onOpenLegal: (String) -> Unit,
     onWithdrawConsent: () -> Unit,
     onReopenDisclosure: () -> Unit,
+    /** Opens the system notification settings for this app (the only fix once denied). */
+    onOpenNotificationSettings: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -111,13 +113,17 @@ internal fun SettingsScreen(
                 ToggleRow(
                     title = "Notifications",
                     detail = if (!notificationsAllowed) {
-                        "Android has blocked notifications for FlutterGuard. Scans still run; enable notifications in system settings to be told when one finishes."
+                        "Android has blocked notifications for FlutterGuard. Scans still run; tap to enable them in system settings and be told when one finishes."
                     } else {
                         "Post the result notification when a scan finishes or fails in the background. The progress notification is required while a scan runs."
                     },
                     checked = settings.notifications && notificationsAllowed,
-                    enabled = notificationsAllowed,
-                    onChange = { on -> onChange { it.copy(notifications = on) } },
+                    // A denied POST_NOTIFICATIONS cannot be re-requested reliably, so
+                    // the row opens the system settings that can actually change it.
+                    onChange = { on ->
+                        if (!notificationsAllowed) onOpenNotificationSettings()
+                        else onChange { it.copy(notifications = on) }
+                    },
                 )
                 ToggleRow(
                     title = "Keep scan history",

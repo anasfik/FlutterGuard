@@ -63,11 +63,13 @@ const val SEE_ALL_MAX = 500
 
 /** The stored report of one package, read on IO; null until the read returns. */
 @Composable
-internal fun rememberStoredReport(packageName: String): StoredReport? {
+internal fun rememberStoredReport(packageName: String, fileScan: Boolean = false): StoredReport? {
     val context = LocalContext.current
-    var stored by remember(packageName) { mutableStateOf<StoredReport?>(null) }
-    LaunchedEffect(packageName) {
-        stored = withContext(Dispatchers.IO) { ReportFiles.load(ReportFiles.appDir(context), packageName) }
+    var stored by remember(packageName, fileScan) { mutableStateOf<StoredReport?>(null) }
+    LaunchedEffect(packageName, fileScan) {
+        stored = withContext(Dispatchers.IO) {
+            ReportFiles.load(ReportFiles.appDir(context), packageName, fileScan)
+        }
     }
     return stored
 }
@@ -126,8 +128,14 @@ internal fun SectionRoute(
     onBack: () -> Unit,
 ) {
     val packageName = destination.packageName
-    val stored = rememberStoredReport(packageName)
-    val report = DetailPhase.report(phase, lastSuccess, packageName, (stored as? StoredReport.Loaded)?.report)
+    val stored = rememberStoredReport(packageName, destination.fileScan)
+    val report = DetailPhase.report(
+        phase,
+        lastSuccess,
+        packageName,
+        (stored as? StoredReport.Loaded)?.report,
+        destination.fileScan,
+    )
 
     Scaffold(
         topBar = {
@@ -186,7 +194,7 @@ internal fun SectionRoute(
         val groups = remember(report.routes, report.dartSources) {
             RecoveredPaths.split(report.routes, report.dartSources)
         }
-        val log = rememberScanLog(packageName, report.generatedAt)
+        val log = rememberScanLog(packageName, report.generatedAt, report.meta.fileScan)
         val hosts = remember(report.hosts) { report.hosts.filter { it.classification != "unclassified" } }
         val parts = rememberArtifactSource(
             packageName,

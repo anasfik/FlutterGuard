@@ -44,8 +44,11 @@ android {
         }
         release {
             isMinifyEnabled = false
-            // lintVital needs the lint-gradle artifact; skip it for offline release builds.
-            lint { checkReleaseBuilds = false }
+            // Release gate: lint must pass (no errors) on every release build.
+            // The remaining warnings are informational: pinned dependency
+            // updates, lint's own notion of "latest targetSdk", and the -v26
+            // qualifier that aapt2 requires for an adaptive icon.
+            lint { checkReleaseBuilds = true; abortOnError = true }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }

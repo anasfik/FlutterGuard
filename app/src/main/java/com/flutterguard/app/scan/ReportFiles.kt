@@ -35,23 +35,139 @@ object ReportFiles {
      */
     const val MAX_REPORT_BYTES = 64L * 1024 * 1024
 
-    /** App-specific external storage so `adb pull` works on the signed release build. */
-    fun appDir(context: Context): File =
-        File(context.getExternalFilesDir(null) ?: context.filesDir, "reports").apply { mkdirs() }
+    /**
+     * A real report is tens of KB, so the one-time external-storage migration
+     * refuses anything bigger than this. It keeps that migration cheap enough to
+     * run from wherever the first `appDir()` call happens.
+     */
+    private const val MIGRATION_MAX_BYTES = 8L * 1024 * 1024
 
-    fun baseName(packageName: String): String = packageName.replace('.', '_')
+    /**
+     * Reports live in internal storage. App-specific external storage was the
+     * original choice, but on API 26-28 any app holding READ_EXTERNAL_STORAGE
+     * can read it (the privacy policy promises it cannot), and after a reinstall
+     * that reuses the data directory the old files belong to the previous UID,
+     * so saving a new report fails with EACCES. Internal storage has neither
+     * problem, and exports already leave through the FileProvider.
+     */
+    fun appDir(context: Context): File {
+        val dir = File(context.filesDir, "reports")
+        dir.mkdirs()
+        if (!migrated) {
+            synchronized(this) {
+                if (!migrated) {
+                    val legacy = context.getExternalFilesDir(null)?.let { File(it, "reports") }
+                    // Final only when shared storage holds nothing of ours any
+                    // more: a file we could not copy, or an unmounted volume, is
+                    // retried on the next call rather than stranded forever.
+                    migrated = runCatching {
+                        // No shared volume at all: nothing to move, and nothing
+                        // that could appear later, so this is final too.
+                        if (legacy == null) true else {
+                            if (legacy.isDirectory) moveReports(legacy, dir)
+                            legacy.listFiles().orEmpty().none { it.isFile && isOurName(it.name) }
+                        }
+                    }.getOrDefault(false)
+                }
+            }
+        }
+        return dir
+    }
 
-    fun jsonFile(dir: File, packageName: String): File = File(dir, baseName(packageName) + JSON_SUFFIX)
+    @Volatile
+    private var migrated = false
 
-    fun historyFile(dir: File, packageName: String): File = File(dir, baseName(packageName) + HISTORY_SUFFIX)
+    /**
+     * Moves reports written by a build that still used external storage into
+     * [to]: copy first, then delete the source, so an interrupted move never
+     * loses the only copy. Anything that already exists in [to] wins, and an
+     * unreadable legacy directory is simply skipped (see [appDir]).
+     *
+     * @return how many of our files (report, history log, inflight marker) were
+     * cleared from [from] — half-written temps are removed but not counted.
+     */
+    fun moveReports(from: File, to: File): Int {
+        to.mkdirs()
+        val sources = from.listFiles() ?: return 0
+        var moved = 0
+        for (src in sources) {
+            if (!src.isFile) continue
+            val name = src.name
+            // A half-written temp can hold a complete report (including recovered
+            // secret values) and is never one we keep: delete, never copy.
+            if (name.endsWith(TMP_SUFFIX)) {
+                // Housekeeping, not a report: deleted but not counted.
+                runCatching { src.delete() }
+                continue
+            }
+            if (!isOurName(name)) continue
+            val target = File(to, name)
+            val handled = when {
+                // A complete target already exists: the new build wrote it, so the
+                // legacy copy is stale. A zero-length one is a crashed copy, not a
+                // report, and must be replaced by the source we still have.
+                target.isFile && target.length() > 0 -> true
+                // Far too large to be one of ours, and possibly holding recovered
+                // secrets: drop it rather than leave it in shared storage, which
+                // "Delete all reports" cannot reach.
+                src.length() > MIGRATION_MAX_BYTES -> true
+                copyAtomically(src, target) -> true
+                else -> false
+            }
+            if (handled && runCatching { src.delete() }.getOrDefault(false)) moved++
+        }
+        return moved
+    }
+
+    /** A legacy file this module owns: a report, a history log or an inflight marker. */
+    private fun isOurName(name: String): Boolean =
+        name.endsWith(JSON_SUFFIX) || name.endsWith(HISTORY_SUFFIX) || name.endsWith(INFLIGHT_SUFFIX)
+
+    /**
+     * Copy through a fsynced temporary sibling, so a crash or power loss mid-copy
+     * cannot leave a truncated report that the next run would treat as complete.
+     */
+    private fun copyAtomically(src: File, target: File): Boolean {
+        val tmp = File(target.parentFile, target.name + TMP_SUFFIX)
+        return runCatching {
+            src.inputStream().use { ins ->
+                FileOutputStream(tmp).use { out ->
+                    ins.copyTo(out, 64 * 1024)
+                    out.flush()
+                    out.fd.sync()
+                }
+            }
+            if (!tmp.renameTo(target)) throw IOException("could not replace ${target.name}")
+            true
+        }.getOrElse {
+            runCatching { tmp.delete() }
+            false
+        }
+    }
+
+    /**
+     * Storage name for one package. A scan of a *picked or shared APK* is a
+     * different subject from the installed app that happens to declare the same
+     * package name: it gets its own `.file` namespace so a trojaned shared APK
+     * can never overwrite, or append a forged history entry to, the verdict the
+     * researcher has for the app actually on the device.
+     */
+    fun baseName(packageName: String, fileScan: Boolean = false): String =
+        packageName.replace('.', '_') + if (fileScan) ".file" else ""
+
+    fun jsonFile(dir: File, packageName: String, fileScan: Boolean = false): File =
+        File(dir, baseName(packageName, fileScan) + JSON_SUFFIX)
+
+    fun historyFile(dir: File, packageName: String, fileScan: Boolean = false): File =
+        File(dir, baseName(packageName, fileScan) + HISTORY_SUFFIX)
 
     /**
      * Reads the persisted report for [packageName]. A present-but-unreadable
      * file is reported as such, never as "no report": the UI must be able to
      * say so and offer a rescan.
      */
-    fun load(dir: File, packageName: String): StoredReport {
-        val file = jsonFile(dir, packageName)
+    fun load(dir: File, packageName: String, fileScan: Boolean = false): StoredReport {
+        val file = jsonFile(dir, packageName, fileScan)
         if (!file.isFile) return StoredReport.Missing
         if (file.length() > MAX_REPORT_BYTES) {
             return StoredReport.Unreadable("stored report is too large (${file.length()} bytes)")
@@ -74,8 +190,8 @@ object ReportFiles {
     fun ownedBy(packageName: String, report: Report): Boolean = report.meta.packageName == packageName
 
     /** Previous history snapshot, or null when there is none (first scan). */
-    fun previousHistory(dir: File, packageName: String): String? =
-        runCatching { historyFile(dir, packageName).readText() }.getOrNull()
+    fun previousHistory(dir: File, packageName: String, fileScan: Boolean = false): String? =
+        runCatching { historyFile(dir, packageName, fileScan).readText() }.getOrNull()
 
     fun save(
         dir: File,
@@ -84,9 +200,11 @@ object ReportFiles {
         history: String,
         /** False when the user turned scan history off: the report is still written. */
         writeHistory: Boolean = true,
+        /** True for a picked/shared APK: stored beside, never over, the installed app's report. */
+        fileScan: Boolean = false,
     ): SavedReport {
         dir.mkdirs()
-        val jsonTarget = jsonFile(dir, packageName)
+        val jsonTarget = jsonFile(dir, packageName, fileScan)
         writeAtomically(jsonTarget, json)
 
         if (!writeHistory) {
@@ -97,7 +215,7 @@ object ReportFiles {
             )
         }
 
-        val histTarget = historyFile(dir, packageName)
+        val histTarget = historyFile(dir, packageName, fileScan)
         // One retained log per app (bounded), merged into the same atomic write.
         // A read failure must not be mistaken for "no history": never overwrite
         // an unreadable log with a single new block.
@@ -125,15 +243,17 @@ object ReportFiles {
      * Marks a scan as in flight. A marker left behind after process death is
      * read back as an interrupted scan, never as a success.
      */
-    fun markInflight(dir: File, packageName: String) {
+    fun markInflight(dir: File, packageName: String, fileScan: Boolean = false) {
         runCatching {
             dir.mkdirs()
-            inflightFile(dir, packageName).writeText(packageName)
+            // The file name carries the namespace; the content stays the bare
+            // package name, so the interrupted banner shows an app, not a file path.
+            inflightFile(dir, packageName, fileScan).writeText(packageName)
         }
     }
 
-    fun clearInflight(dir: File, packageName: String) {
-        runCatching { inflightFile(dir, packageName).delete() }
+    fun clearInflight(dir: File, packageName: String, fileScan: Boolean = false) {
+        runCatching { inflightFile(dir, packageName, fileScan).delete() }
     }
 
     /** Package names whose scan never reached a terminal state, excluding [keep]. */
@@ -142,6 +262,8 @@ object ReportFiles {
             ?.filter { it.isFile && it.name.endsWith(INFLIGHT_SUFFIX) }
             ?.mapNotNull { f -> runCatching { f.readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() } }
             ?.filter { it !in keep }
+            // One package can own a marker in each namespace; that is one app.
+            ?.distinct()
             ?.sorted()
             ?: emptyList()
 
@@ -158,8 +280,8 @@ object ReportFiles {
             }
     }
 
-    private fun inflightFile(dir: File, packageName: String): File =
-        File(dir, baseName(packageName) + INFLIGHT_SUFFIX)
+    internal fun inflightFile(dir: File, packageName: String, fileScan: Boolean = false): File =
+        File(dir, baseName(packageName, fileScan) + INFLIGHT_SUFFIX)
 
     /**
      * Deletes every artifact this app wrote into [dir]: reports, history logs,

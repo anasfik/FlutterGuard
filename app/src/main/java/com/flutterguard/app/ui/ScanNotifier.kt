@@ -1,13 +1,17 @@
 package com.flutterguard.app.ui
 
+import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.flutterguard.app.MainActivity
 import com.flutterguard.app.scan.ScanPhase
 import com.flutterguard.app.scan.ScanStore
@@ -34,6 +38,26 @@ object ScanNotifier {
     private const val CHANNEL_ID = "scan_results"
     private const val NOTIF_ID = 1003
 
+    /**
+     * The one place that posts a non-foreground notification.
+     *
+     * POST_NOTIFICATIONS is revocable at any time from API 33 on, and a missing
+     * grant throws nothing but silently drops the notification — so every caller
+     * has to ask first. Keeping the check here means no call site can forget it.
+     */
+    fun post(context: Context, id: Int, notification: Notification): Boolean {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        return runCatching {
+            NotificationManagerCompat.from(context).notify(id, notification)
+        }.isSuccess
+    }
+
     fun terminal(context: Context, phase: ScanPhase) {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return
@@ -49,14 +73,12 @@ object ScanNotifier {
             else -> return
         }
         runCatching {
-            if (Build.VERSION.SDK_INT >= 26) {
-                val nm = context.getSystemService(NotificationManager::class.java)
-                if (nm?.getNotificationChannel(CHANNEL_ID) == null) {
-                    nm?.createNotificationChannel(
-                        NotificationChannel(CHANNEL_ID, "Scan results", NotificationManager.IMPORTANCE_DEFAULT)
-                            .apply { setShowBadge(false) },
-                    )
-                }
+            val nm = context.getSystemService(NotificationManager::class.java)
+            if (nm?.getNotificationChannel(CHANNEL_ID) == null) {
+                nm?.createNotificationChannel(
+                    NotificationChannel(CHANNEL_ID, "Scan results", NotificationManager.IMPORTANCE_DEFAULT)
+                        .apply { setShowBadge(false) },
+                )
             }
             val open = PendingIntent.getActivity(
                 context,
@@ -72,7 +94,7 @@ object ScanNotifier {
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .build()
-            manager.notify(NOTIF_ID, notification)
+            post(context, NOTIF_ID, notification)
         }
     }
 }

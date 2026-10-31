@@ -66,7 +66,7 @@ object FileImport {
             ?.let { AxmlDecoder.decode(it) }
             ?: throw FileImportException("No readable AndroidManifest.xml in this file; is it an APK?")
         Scanner.fileMeta(root, apk.nameWithoutExtension)
-            ?: throw FileImportException("The manifest declares no package name; is it an APK?")
+            ?: throw FileImportException("The manifest declares no usable package name; is it an APK?")
     }
 
     /** Bounded copy: refuses a file larger than [maxBytes] and never leaves a partial target behind. */

@@ -1,5 +1,6 @@
 package com.flutterguard.app.ui
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -228,6 +229,9 @@ object ScanQueueGate {
  * is not unit-tested; only its pure predicates, gate and summary text are.
  * Instrument it if a sequencing bug ever survives review.
  */
+// Holds only the application context (passed in as `appContext`), which lives as
+// long as the process, so the static-field leak warning does not apply.
+@SuppressLint("StaticFieldLeak")
 object ScanQueueRunner {
 
     private const val CHANNEL_ID = "scan_queue"
@@ -364,14 +368,12 @@ object ScanQueueRunner {
         // The Settings toggle is the user's answer for the whole app, queue included.
         if (!com.flutterguard.app.settings.Settings.snapshot(context).notifications) return
         runCatching {
-            if (Build.VERSION.SDK_INT >= 26) {
-                val nm = context.getSystemService(NotificationManager::class.java)
-                if (nm?.getNotificationChannel(CHANNEL_ID) == null) {
-                    nm?.createNotificationChannel(
-                        NotificationChannel(CHANNEL_ID, "Scan-all queue", NotificationManager.IMPORTANCE_LOW)
-                            .apply { setShowBadge(false) },
-                    )
-                }
+            val nm = context.getSystemService(NotificationManager::class.java)
+            if (nm?.getNotificationChannel(CHANNEL_ID) == null) {
+                nm?.createNotificationChannel(
+                    NotificationChannel(CHANNEL_ID, "Scan-all queue", NotificationManager.IMPORTANCE_LOW)
+                        .apply { setShowBadge(false) },
+                )
             }
             val open = PendingIntent.getActivity(
                 context,
@@ -381,7 +383,6 @@ object ScanQueueRunner {
             )
             val cancelled = state.cancelled
             val text = queueSummaryText(state.done, state.failures, cancelled, requested, state.remaining)
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle(if (cancelled > 0) "Scan-all cancelled" else "Scan-all finished")
@@ -389,7 +390,7 @@ object ScanQueueRunner {
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .build()
-            NotificationManagerCompat.from(context).notify(NOTIF_ID, notification)
+            ScanNotifier.post(context, NOTIF_ID, notification)
         }
     }
 }

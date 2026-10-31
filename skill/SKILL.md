@@ -13,7 +13,7 @@ Do not silently change a user app's permissions, signing, dependencies, auth, pa
 
 ## Companion App
 
-This repository also contains FlutterGuard for Android (`app/`, package `com.flutterguard.app`): a Kotlin + Jetpack Compose app that runs the same rule families on the phone. It has no `INTERNET` permission and performs every scan locally; it requests only `QUERY_ALL_PACKAGES`, enumerates installed apps, and reads each app's `base.apk` plus splits through `publicSourceDir`. Results are written to app-specific external storage, `/sdcard/Android/data/com.flutterguard.app/files/reports/<package>.json` (pullable with `adb pull` even on the signed release build) (dots replaced by underscores, schema `flutterguard/report/1`), with a `<package>.hist` snapshot beside it.
+This repository also contains FlutterGuard for Android (`app/`, package `com.flutterguard.app`): a Kotlin + Jetpack Compose app that runs the same rule families on the phone. It has no `INTERNET` permission and performs every scan locally; it requests only `QUERY_ALL_PACKAGES`, enumerates installed apps, and reads each app's `base.apk` plus splits through `publicSourceDir`. Results are written to internal storage, `files/reports/<package>.json` (dots replaced by underscores, schema `flutterguard/report/1`), with a `<package>.hist` snapshot beside it. Picked or shared APKs get their own `<package>.file.json` namespace so a shared APK can never overwrite the installed app's verdict. Read a report off a debug build with `adb exec-out run-as com.flutterguard.app cat files/reports/<package>.json`; on a release build use Share JSON.
 
 Prefer the app when:
 

@@ -92,6 +92,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The user can change notification permission in system settings while this
+     * activity is stopped (and a denial cannot be re-requested reliably), so the
+     * banner and the Settings row must re-read it on every return.
+     */
+    override fun onResume() {
+        super.onResume()
+        notificationsAllowed = NotificationManagerCompat.from(this).areNotificationsEnabled() &&
+            (android.os.Build.VERSION.SDK_INT < 33 ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -121,7 +134,7 @@ class MainActivity : ComponentActivity() {
     private fun sharedApkUri(intent: Intent?): Uri? {
         if (intent?.action != Intent.ACTION_SEND) return null
         val type = intent.type.orEmpty()
-        if (!type.contains("package-archive") && type != "application/zip" && type != "application/octet-stream") return null
+        if (!type.contains("package-archive") && type != "application/zip") return null
         @Suppress("DEPRECATION")
         return intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
     }
@@ -149,6 +162,23 @@ class MainActivity : ComponentActivity() {
 
 /** One file-pick or share import; [id] makes a repeated pick a new effect key. */
 private data class FileImportRequest(val uri: Uri, val id: Long)
+
+/**
+ * Opens this app's notification settings. Once POST_NOTIFICATIONS is denied the
+ * system stops showing the request dialog, so this is the only route that works.
+ */
+internal fun openNotificationSettings(context: android.content.Context) {
+    val pkg = context.packageName
+    val intents = listOf(
+        Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, pkg),
+        Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(android.net.Uri.parse("package:$pkg")),
+    )
+    for (i in intents) {
+        if (runCatching { context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
+    }
+}
 
 /**
  * Navigation + state that must survive screen changes: the inventory, scan
@@ -191,7 +221,9 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
     var packageInput by rememberSaveable { mutableStateOf("") }
     var packageError by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
-    var interrupted by remember { mutableStateOf<List<String>>(emptyList()) }
+    // Saved: the markers are deleted the moment they are shown, so a rotation
+    // that dropped this list would report the interruption to nobody.
+    var interrupted by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
 
     // Picker and share-sheet both land here; one import effect serves both.
     // The request carries a sequence so picking the same file twice is a new key
@@ -241,6 +273,25 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
         if (settings.inventoryAllowed()) InventoryStore.refresh(context)
     }
 
+    // A scan that times out or is destroyed *while this screen is open* leaves its
+    // marker after the activity was created, so the banner has to re-read it when
+    // the scan stops instead of waiting for the next cold start. The first pass is
+    // the cold-start block above; re-running it here would only clear what that one
+    // just found.
+    var coldStartPass by remember { mutableStateOf(true) }
+    val runningPkg = scan.running?.job?.packageName
+    LaunchedEffect(runningPkg) {
+        if (coldStartPass) {
+            coldStartPass = false
+            return@LaunchedEffect
+        }
+        if (runningPkg != null) return@LaunchedEffect
+        val dir = ReportFiles.appDir(context)
+        val live = listOfNotNull(ScanStore.state.value.running?.job?.packageName)
+        interrupted = ReportFiles.interrupted(dir, keep = live)
+        ReportFiles.clearInterrupted(dir, keep = live)
+    }
+
     // A shared or picked APK: copy it, identify it from its manifest, then hand
     // the copy to the single scan owner. The report screen opens immediately so
     // progress and failure are visible where the user expects them.
@@ -255,7 +306,10 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
         result.onSuccess { imported ->
             if (ScanService.startFile(context, imported.packageName, imported.file)) {
                 search = search.collapse()
-                stack = NavStack.push(stack, Destination.Details(imported.packageName))
+                stack = NavStack.push(
+                    stack,
+                    Destination.Details(imported.packageName, fileScan = true),
+                )
             } else {
                 imported.file.delete()
                 Toast.makeText(
@@ -396,6 +450,7 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
             is Destination.Details -> DetailsScreen(
                 app = inventory.apps.firstOrNull { it.packageName == current.packageName },
                 packageName = current.packageName,
+                fileScan = current.fileScan,
                 phase = scan.phase,
                 lastSuccess = scan.lastSuccess,
                 section = current.section,
@@ -404,10 +459,19 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
                 onSection = { name -> stack = NavStack.replaceTop(stack, current.copy(section = name)) },
                 onBack = { stack = NavStack.pop(stack) },
                 onSeeAll = { target, filter ->
-                    stack = NavStack.push(stack, Destination.Section(current.packageName, target, filter))
+                    stack = NavStack.push(
+                        stack,
+                        Destination.Section(current.packageName, target, filter, current.fileScan),
+                    )
                 },
                 onRescan = {
-                    if (!ScanService.start(context, current.packageName)) {
+                    // A file report is about a copy in the cache, so "re-scan",
+                    // re-picking the APK is the only thing that can refresh it;
+                    // an installed scan of the same package name would write the
+                    // other namespace and leave this report stale.
+                    if (current.fileScan) {
+                        pickFile()
+                    } else if (!ScanService.start(context, current.packageName)) {
                         Toast.makeText(context, "Scan not started: another scan is running or still stopping.", Toast.LENGTH_SHORT).show()
                     }
                 },
@@ -439,6 +503,7 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
                 notificationsAllowed = notificationsAllowed,
                 onBack = { stack = NavStack.pop(stack) },
                 onChange = { transform -> Settings.update(context, transform) },
+                onOpenNotificationSettings = { openNotificationSettings(context) },
                 onOpenLegal = { doc -> stack = NavStack.push(stack, Destination.Legal(doc)) },
                 onWithdrawConsent = {
                     // Back to the disclosure, with inventory revoked immediately.

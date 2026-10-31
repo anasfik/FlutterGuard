@@ -127,12 +127,25 @@ object Scanner {
     )
 
     /**
+     * A name Android would actually install. Enforced because a picked APK is
+     * untrusted input and its package name reaches a file name and a navigation
+     * route: a crafted value containing the route separator (U+001F) would
+     * otherwise decode into a different screen after a restart.
+     */
+    private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+
+    fun isInstalledPackageName(name: String): Boolean = PACKAGE_NAME.matches(name)
+
+    /**
      * Manifest identity for a file scan. Resource references (`@ref/0x…`, `@string/…`)
      * are not resolved here, so they fall back to null/placeholder rather than a
-     * made-up value. Null only when the manifest has no package name at all.
+     * made-up value. Null when the manifest has no usable package name — absent,
+     * a resource reference, or not a name Android would accept.
      */
     fun fileMeta(manifest: AxmlNode, fallbackLabel: String): FileMeta? {
-        val pkg = manifest.attr("package")?.takeIf { it.isNotBlank() && !it.startsWith("@") } ?: return null
+        val pkg = manifest.attr("package")
+            ?.takeIf { it.isNotBlank() && !it.startsWith("@") && isInstalledPackageName(it) }
+            ?: return null
         val usesSdk = manifest.child("uses-sdk")
         fun attrInt(name: String): Int? =
             manifest.attr(name)?.takeIf { !it.startsWith("@") }?.toIntOrNull()

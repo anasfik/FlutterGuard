@@ -19,7 +19,7 @@ Do not include real production secrets, signing keys, customer data, or private 
 - It has no `INTERNET` permission and makes no network requests. All parsing, decoding and rule evaluation happen in the app process.
 - It reads only what the OS already exposes to any app: the `base.apk` and split APKs of installed packages, plus package metadata.
 - `android:allowBackup="false"` is set, so app-private data is not included in cloud or adb backups.
-- Reports live in app-specific external storage (`Android/data/com.flutterguard.app/files/reports/`), private to the app on Android 11+ but deliberately `adb pull`-able for headless/CI use (the release build is not debuggable) and are only exposed through a non-exported `FileProvider` scoped to `cache/exports/`, when the user picks "Share JSON" or "Share Markdown". Nothing leaves the device unless the user shares it.
+- Reports live in internal storage (`files/reports/`), unreadable by other apps on every supported API level, and are only exposed through a non-exported `FileProvider` scoped to `cache/exports/`, when the user picks "Share JSON" or "Share Markdown". Nothing leaves the device unless the user shares it.
 - The headless mode (`-e scan <package>`) writes the same report and logs only its path (`FG_REPORT <path>`), not report contents.
 
 ## Report Contents

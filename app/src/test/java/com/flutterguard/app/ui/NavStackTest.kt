@@ -1,6 +1,7 @@
 package com.flutterguard.app.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -28,6 +29,25 @@ class NavStackTest {
         assertEquals(stack, NavStack.pop(stack))
         assertEquals(home, NavStack.current(NavStack.pop(stack)))
         assertFalse(NavStack.canPop(NavStack.pop(stack)))
+    }
+
+    @Test
+    fun aSeeAllRouteRemembersTheNamespaceItWasOpenedFrom() {
+        val fileSection = Destination.Section(
+            "com.example.app",
+            SeeAllTarget.HOSTS,
+            "",
+            fileScan = true,
+        )
+        val installed = Destination.Section("com.example.app", SeeAllTarget.HOSTS)
+        // Identity: a saved state is not shared between the two namespaces.
+        assertNotEquals(NavStack.stateKey(installed), NavStack.stateKey(fileSection))
+        // Round trip: the flag survives a restart, which is the only reason it exists.
+        assertEquals(fileSection, NavStack.decode(NavStack.encode(fileSection)))
+        // A save written before sections carried the flag has four fields: the
+        // filter was the last one, so a stale filter is dropped, not misread.
+        val legacy = "section\u001Fcom.example.app\u001F${SeeAllTarget.HOSTS.name}\u001FAI providers"
+        assertEquals(installed, NavStack.decode(legacy))
     }
 
     @Test
@@ -62,6 +82,22 @@ class NavStackTest {
     fun everyDestinationRoundTripsThroughItsSavedForm() {
         val stack = listOf(home, details, Destination.Section("com.other.app", SeeAllTarget.DEPENDENCIES, "dio"))
         assertEquals(stack, NavStack.restore(NavStack.save(stack)))
+    }
+
+    @Test
+    fun aFileScanRouteRemembersItsOwnReportNamespace() {
+        // A picked APK that declares an installed package reads its own `.file`
+        // report; losing the flag on restore would show the installed app's verdict.
+        val picked = Destination.Details("com.whatsapp", fileScan = true)
+        val stack = NavStack.push(NavStack.root(), picked)
+        assertEquals(picked, NavStack.restore(NavStack.save(stack)).last())
+        assertEquals(picked, NavStack.decode(NavStack.encode(picked)))
+        assertNotEquals(NavStack.stateKey(picked), NavStack.stateKey(Destination.Details("com.whatsapp")))
+        // A save written before the flag existed still resolves to the installed app.
+        assertEquals(
+            Destination.Details("com.whatsapp", "Findings", fileScan = false),
+            NavStack.decode("details\u001Fcom.whatsapp\u001FFindings"),
+        )
     }
 
     @Test
