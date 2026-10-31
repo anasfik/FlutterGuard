@@ -76,12 +76,31 @@ is a personal account that still owes the closed-testing requirement (12
 testers for 14 continuous days). That gate is account-level; nothing in the
 build can satisfy it.
 
-## 3. After the first publish
+## 3. Why the first production release has to be made in Console
 
-The API takes over completely: future bundles, tracks, rollouts and listing
-edits all work, because the app is no longer a draft app. Until then, a
-production release can only be created as `draft` — Play rejects `completed`
-with `Only releases with status draft may be created on draft app`.
+All five ways the API can express "publish to production" were tried against
+`com.flutterguard.app`; every one is rejected, and the rejections are
+contradictory by design:
+
+| Attempt | Google's response |
+| --- | --- |
+| `status: completed`, no countries | `Release in track targeting no countries` |
+| `status: completed` + `countryTargeting` | `Country targeting is only supported for staged releases` |
+| `status: inProgress` (staged), no countries | `The first release on a track cannot be staged` |
+| `status: inProgress`, `userFraction: 1.0` | `User fraction must be ... lower than one` |
+| `PUT /edits/{id}/countryAvailability/production` | 404, method does not exist |
+
+So: the first release on a track must be `completed`, `completed` must have
+countries, and countries only exist on staged releases. Only the Console
+wizard sets countries for a non-staged first release.
+
+Everything else is API-driven: internal (0.3.2/7, completed), closed testing
+alpha (0.3.2/7, completed, 177 countries + rest of world), the bundle, the
+listing and the images.
+
+After that first production release is published, later rollouts and updates
+go through `docs/play/upload.py` — bundle upload, track updates, listing text
+and images all work once the app is live.
 
 ## 4. Facts to keep straight
 
