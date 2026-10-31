@@ -1,0 +1,27 @@
+FlutterGuard is a static security audit for the Flutter apps already on your phone. It reads the APK the system already exposes, parses the formats that matter, and hands you a report with evidence — entirely on the device, with no network permission at all.
+
+WHY
+Flutter apps hide their logic in libapp.so and bury API keys in assets, resources.arsc and native libraries. The usual advice — "decompile it on your desktop" — is slow, fails on obfuscated AOT snapshots, and needs a matching Dart SDK. FlutterGuard does the part that works from the phone, in 30 to 90 seconds, without root and without intercepting traffic.
+
+WHAT A REPORT CONTAINS
+• Artifact: package, version, SDK range, ABIs, size, splits, base APK hash, every native library with its size and SHA-256 prefix, installer, signing schemes, signer certificate and fingerprints, debug-certificate detection.
+• Flutter specifics: whether it is really Flutter, AOT or debug (JIT kernel), kernel_blob.bin size, engine version, obfuscation state, the Dart package inventory recovered from NOTICES.Z and package: URIs, and a fingerprint you can hand to a desktop follow-up.
+• Manifest risk: permissions, exported components, debuggable, backup, cleartext policy, network security config, deep links per scheme.
+• Secrets and endpoints: API keys for the usual providers, OAuth client IDs, JWT-like tokens, database and broker URIs with inline credentials, private key blocks, embedded certificates, .env files, plus every host with its classification and the API routes recovered from the Dart snapshot.
+• SDKs and services: the third-party SDKs and AI providers shipped inside, matched from files, DEX prefixes, package names and embedded hostnames — each listed with the evidence that fired.
+• A grade from A to F, with the severity breakdown that produced it.
+
+RUN IT REPEATEDLY
+Every scan is stamped and kept, so a second scan tells you what changed between two versions of the same app — new hosts, new routes, new dependencies, new findings. That diff is where the real signal is.
+
+WHAT IT IS NOT
+The grade is a triage label, not a verdict. Static matches are evidence, not proof: a key-shaped string may be a placeholder, and an SDK name may be a coincidence. Nothing is claimed about runtime behaviour, and the app never pretends to detect malware.
+
+PRIVACY
+No INTERNET permission, so nothing can leave the device — not telemetry, not crash reports, not the APKs. No account, no ads, no analytics. Reports live in FlutterGuard's private storage and leave only when you tap Share. Secrets found in an APK are masked by default; revealing one is a deliberate per-item action that also blocks screenshots.
+
+ALSO USEFUL FOR
+Auditing an APK you downloaded before installing it: use the file picker or the share sheet, and the report is kept separately from any installed app of the same name.
+
+Open source: https://github.com/anasfik/FlutterGuard
+Privacy: https://gwhyyy.com/privacy/flutterguard

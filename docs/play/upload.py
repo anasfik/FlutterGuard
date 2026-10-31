@@ -93,37 +93,31 @@ class Play:
     # ---- operations ----------------------------------------------------
     def upload_bundle(self, aab: pathlib.Path, track: str, notes: str, status: str):
         edit = self.open_edit()
-        start = self.call(
-            "POST",
+        # The resumable session URI is returned in the Location *header* and the
+        # body is empty. One request: requesting twice leaves an orphan session.
+        req = urllib.request.Request(
             f"{UPLOAD}/applications/{self.pkg}/edits/{edit}/bundles?uploadType=resumable",
+            data=b"{}",
             headers={
+                "Authorization": f"Bearer {self.tok}",
                 "X-Upload-Content-Type": "application/octet-stream",
                 "X-Upload-Content-Length": str(aab.stat().st_size),
                 "Content-Type": "application/json; charset=UTF-8",
             },
-            payload={},
+            method="POST",
         )
-        location = start["Location"] if isinstance(start, dict) and "Location" in start else None
-        if not location:  # header, not body — re-request and read the header directly
-            req = urllib.request.Request(
-                f"{UPLOAD}/applications/{self.pkg}/edits/{edit}/bundles?uploadType=resumable",
-                data=b"{}",
-                headers={
-                    "Authorization": f"Bearer {self.tok}",
-                    "X-Upload-Content-Type": "application/octet-stream",
-                    "Content-Type": "application/json; charset=UTF-8",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req) as r:
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
                 location = r.headers["Location"]
+        except urllib.error.HTTPError as e:
+            sys.exit(f"HTTP {e.code} opening upload session\n{e.read().decode(errors='replace')[:600]}")
         req = urllib.request.Request(
             location,
             data=aab.read_bytes(),
             headers={"Content-Type": "application/octet-stream"},
             method="PUT",
         )
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=600) as r:
             version_code = json.loads(r.read())["versionCode"]
         self.call(
             "PUT",
@@ -144,19 +138,25 @@ class Play:
 
     def set_listing(self, lang: str, title, short, full):
         edit = self.open_edit()
-        body = {}
+        # PUT replaces the whole listing, so start from what is already there:
+        # uploading a description must not wipe the title (or the reverse).
+        base = f"{API}/applications/{self.pkg}/edits/{edit}/listings/{lang}"
+        current = self.call("GET", base)
+        body = {k: current[k] for k in ("title", "shortDescription", "fullDescription",
+                                        "video") if k in current}
         if title:
             body["title"] = title
         if short:
             body["shortDescription"] = short
         if full:
             body["fullDescription"] = full
-        self.call(
-            "PUT", f"{API}/applications/{self.pkg}/edits/{edit}/listings/{lang}", body
-        )
-        print(f"listing {lang} updated: {', '.join(body)}")
+        self.call("PUT", base, body)
+        print(f"listing {lang} updated: {', '.join(k for k in body)}")
 
     def set_images(self, lang: str, image_type: str, files):
+        missing = [f for f in files if not pathlib.Path(f).is_file()]
+        if missing:
+            sys.exit(f"missing image files: {missing}")
         edit = self.open_edit()
         base = f"{API}/applications/{self.pkg}/edits/{edit}/listings/{lang}/{image_type}"
         self.call("DELETE", base)
@@ -175,7 +175,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--key", default=os.environ.get("PLAY_SA_JSON"), help="service-account JSON")
     ap.add_argument("--pkg", default="com.flutterguard.app")
-    ap.add_argument("--dry-run", action="store_true", help="open an edit and commit nothing")
+    ap.add_argument("--dry-run", action="store_true", help="print the plan, send nothing")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     b = sub.add_parser("bundle")
@@ -199,6 +199,10 @@ def main():
     if not a.key:
         sys.exit("set PLAY_SA_JSON or pass --key")
 
+    if a.dry_run:
+        print(f"dry run: would run '{a.cmd}' against {a.pkg}; nothing was sent")
+        return
+
     play = Play(a.key, a.pkg)
     if a.cmd == "bundle":
         notes = pathlib.Path(a.notes_file).read_text() if a.notes_file else ""
@@ -209,9 +213,6 @@ def main():
     else:
         play.set_images(a.lang, a.type, a.files)
 
-    if a.dry_run:
-        print("dry run: edit left open, nothing committed")
-        return
     play.commit()
     print("committed")
 
