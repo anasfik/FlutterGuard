@@ -36,11 +36,12 @@ object ReportFiles {
     const val MAX_REPORT_BYTES = 64L * 1024 * 1024
 
     /**
-     * A real report is tens of KB, so the one-time external-storage migration
-     * refuses anything bigger than this. It keeps that migration cheap enough to
-     * run from wherever the first `appDir()` call happens.
+     * Legacy files above [MAX_REPORT_BYTES] are not reports this app can ever
+     * load, so migration drops them instead of leaving them in shared storage.
+     * Everything it *would* display is copied — deleting a readable report to
+     * keep the move cheap would be data loss.
      */
-    private const val MIGRATION_MAX_BYTES = 8L * 1024 * 1024
+    private const val MIGRATION_MAX_BYTES = MAX_REPORT_BYTES
 
     /**
      * Reports live in internal storage. App-specific external storage was the

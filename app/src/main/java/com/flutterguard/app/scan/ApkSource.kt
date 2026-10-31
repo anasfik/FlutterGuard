@@ -152,22 +152,23 @@ class ApkSource(parts: List<ApkPart>) : AutoCloseable {
     fun bytes(name: String, maxBytes: Int = 64 * 1024 * 1024): ByteArray? {
         val (z, e) = entry(name) ?: return null
         if (e.size > maxBytes) return null
-        // An entry that under-declares its size must not grow to the caller's
-        // cap: either its own number is the truth, or it is lying and is skipped.
-        val limit = if (e.size in 1..maxBytes) e.size.toInt() else maxBytes
-        return z.getInputStream(e).use { ins ->
-            val out = java.io.ByteArrayOutputStream(minOf(limit, 1 shl 20))
+        val limit = budget(e.size, maxBytes)
+        // Sized exactly once. A `ByteArrayOutputStream` would double to 128 MB and
+        // then copy into the result, peaking at ~2.4x the entry; a real 90 MB DEX
+        // is enough to be killed for that.
+        val out = ByteArray(limit)
+        var total = 0
+        z.getInputStream(e).use { ins ->
             val buf = ByteArray(64 * 1024)
-            var total = 0
             while (true) {
                 val n = ins.read(buf)
                 if (n <= 0) break
+                if (total + n > limit) return null
+                System.arraycopy(buf, 0, out, total, n)
                 total += n
-                if (total > limit) return null
-                out.write(buf, 0, n)
             }
-            out.toByteArray()
         }
+        return if (total == limit) out else out.copyOf(total)
     }
 
     fun names(): Set<String> {
@@ -187,6 +188,17 @@ class ApkSource(parts: List<ApkPart>) : AutoCloseable {
         /** Default bounded preview; a caller may ask for less, never for more than [MAX_PREVIEW_BYTES]. */
         const val DEFAULT_PREVIEW_BYTES = 32 * 1024
         const val MAX_PREVIEW_BYTES = 128 * 1024
+
+        /**
+         * How many bytes one entry may occupy, given what its central directory
+         * claims. A hostile APK can declare nothing (or lie) for a huge entry, and
+         * the old streaming path survived that only because it grew the buffer as
+         * bytes arrived. Now that the array is sized once, an unbelievable size
+         * gets a small window instead of the caller's cap: a 1 KB APK full of
+         * empty `classesN.dex` entries must not reserve hundreds of megabytes.
+         */
+        internal fun budget(declared: Long, maxBytes: Int): Int =
+            if (declared in 1..maxBytes.toLong()) declared.toInt() else minOf(maxBytes, 1 shl 20)
 
         fun sha256(file: File): String {
             val md = MessageDigest.getInstance("SHA-256")

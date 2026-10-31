@@ -254,6 +254,13 @@ class ScanStateTest {
 
         val cancelledOther = runningOther.cancelled(1)
         assertTrue(ScanStartPolicy.shouldAutoStart(cancelledOther.phase, "com.example.app"))
+        // A finished picked-APK scan of this very package says nothing about the
+        // installed app: opening it must still start a scan, and opening the file
+        // route must not start a second one.
+        val (fileRunning, _) = ScanState().start(job(4, "com.example.app").copy(fileScan = true))
+        val doneFile = fileRunning.succeeded(4, report("com.example.app"), "/tmp/a.file.json", null, emptyList())
+        assertTrue(ScanStartPolicy.shouldAutoStart(doneFile.phase, "com.example.app", fileScan = false))
+        assertFalse(ScanStartPolicy.shouldAutoStart(doneFile.phase, "com.example.app", fileScan = true))
         assertFalse(ScanStartPolicy.shouldAutoStart(cancelledOther.phase, "com.other.app"))
     }
 }

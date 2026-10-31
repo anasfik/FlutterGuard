@@ -198,7 +198,9 @@ internal fun SectionRoute(
         val hosts = remember(report.hosts) { report.hosts.filter { it.classification != "unclassified" } }
         val parts = rememberArtifactSource(
             packageName,
-            enabled = destination.target == SeeAllTarget.ARTIFACTS,
+            // Same guard DetailsScreen applies: a file report describes an APK
+            // that is not the installed one.
+            enabled = destination.target == SeeAllTarget.ARTIFACTS && !report.meta.fileScan,
         )
         var previewEntry by remember(packageName) { mutableStateOf<ArtifactEntry?>(null) }
 

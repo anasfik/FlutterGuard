@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive-icon background: the app's deep teal surface, flat by design. -->
+<!-- Adaptive-icon background: the brand charcoal tile from flutterguard.dev, flat by design. -->
 <resources>
-    <color name="ic_launcher_background">#00363D</color>
+    <color name="ic_launcher_background">#0e1110</color>
 </resources>

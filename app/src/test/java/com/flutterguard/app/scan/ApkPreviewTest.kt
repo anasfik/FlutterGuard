@@ -51,6 +51,21 @@ class ApkPreviewTest {
     }
 
     @Test
+    fun anUnbelievableEntrySizeDoesNotReserveTheCallersWholeCap() {
+        // 96 MiB is what the DEX reader asks for. A lying (or zero) declared size
+        // must not turn that into a per-entry reservation: the blocker was an OOM
+        // from a 1 KB APK carrying many empty `classesN.dex` entries.
+        val cap = 96 * 1024 * 1024
+        assertEquals(1 shl 20, ApkSource.budget(0, cap))
+        assertEquals(1 shl 20, ApkSource.budget(-1, cap))
+        assertEquals(5000, ApkSource.budget(5000, cap))
+        // Above the cap the read is refused before this is consulted, so the
+        // decision only has to stay small rather than claim the cap.
+        assertEquals(1 shl 20, ApkSource.budget((cap + 1).toLong(), cap))
+        assertEquals(4096, ApkSource.budget((cap + 1).toLong(), 4096))
+    }
+
+    @Test
     fun duplicateSplitPathsKeepDistinctProvenance() {
         val base = zip("base.apk", mapOf("lib/arm64-v8a/libapp.so" to bytes("FROM-BASE")))
         val split = zip("split.apk", mapOf("lib/arm64-v8a/libapp.so" to bytes("FROM-SPLIT")))

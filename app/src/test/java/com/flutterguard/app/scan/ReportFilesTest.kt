@@ -252,11 +252,19 @@ class ReportFilesTest {
         val legacy = createTempDir("fg-legacy-big")
         val current = File(createTempDir("fg-current-big"), "reports").apply { mkdirs() }
         try {
-            // 9 MB: bigger than any report we write, so it is not ours to keep.
-            File(legacy, "com_huge.json").writeBytes(ByteArray(9 * 1024 * 1024))
-            // One legacy file cleared: dropped, not copied.
+            // 9 MB is still a report the app would load, so it must be copied, not
+            // dropped: the migration cap is the readable limit, not a tidiness knob.
+            val readable = File(legacy, "com_large.json")
+            readable.outputStream().use { out -> out.write(ByteArray(9 * 1024 * 1024)); out.flush() }
             assertEquals(1, ReportFiles.moveReports(legacy, current))
-            assertFalse("an oversized legacy report must not survive", File(legacy, "com_huge.json").exists())
+            assertFalse("a readable legacy report must be moved", readable.exists())
+            assertEquals(9L * 1024 * 1024, File(current, "com_large.json").length())
+
+            // Above the loadable limit it can never be a report, so it is not kept.
+            val unreadable = File(legacy, "com_huge.json")
+            unreadable.outputStream().use { out -> out.write(ByteArray(65 * 1024 * 1024)); out.flush() }
+            assertEquals(1, ReportFiles.moveReports(legacy, current))
+            assertFalse("an unloadable legacy file must not survive", unreadable.exists())
             assertFalse(File(current, "com_huge.json").exists())
 
             // An unrelated file is left alone: it is not ours.

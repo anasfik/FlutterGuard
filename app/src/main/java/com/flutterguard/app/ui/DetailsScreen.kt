@@ -91,6 +91,7 @@ import com.flutterguard.app.scan.ScanLog
 import com.flutterguard.app.scan.StoredReport
 import com.flutterguard.app.scan.ScanLogEntry
 import com.flutterguard.app.scan.ScanPhase
+import com.flutterguard.app.scan.fileScan
 import com.flutterguard.app.scan.packageName
 import com.flutterguard.app.scan.ScanStartPolicy
 import com.flutterguard.app.scan.ScanStore
@@ -126,7 +127,7 @@ internal fun DetailsScreen(
     onRescan: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val mine = phase.packageName == packageName
+    val mine = phase.packageName == packageName && phase.fileScan == fileScan
     // Same package, same namespace: a file scan's report and diff must never be
     // rendered as the installed app's (and the reverse).
     val done = (phase as? ScanPhase.Done)?.takeIf { mine && it.report.meta.fileScan == fileScan }
@@ -157,17 +158,20 @@ internal fun DetailsScreen(
     var exportOpen by rememberSaveable { mutableStateOf(false) }
 
     val busyElsewhere = phase is ScanPhase.Running && phase.packageName != packageName
-    LaunchedEffect(packageName, busyElsewhere, report != null, stored != null) {
+    LaunchedEffect(packageName, fileScan, busyElsewhere, report != null, stored != null) {
         // Opening this workspace starts a scan once, only when there is nothing
         // to show, nothing else is running and the scan-all queue does not own
-        // the single execution slot.
+        // the single execution slot. A file route is never auto-started: its
+        // rescan re-opens the document picker, which must only ever be a
+        // deliberate tap.
         val queueActive = ScanQueueRunner.state.value.active
-        if (app != null && stored != null &&
+        if (!fileScan && app != null && stored != null &&
             ScanStartPolicy.shouldAutoStart(
                 ScanStore.state.value.phase,
                 packageName,
                 queueActive = queueActive,
                 hasReport = report != null,
+                fileScan = fileScan,
             )
         ) {
             onRescan()
@@ -219,7 +223,7 @@ internal fun DetailsScreen(
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             // A2: a scan of another package is a banner, never a blank page.
-            when (DetailPhase.pane(phase, packageName, hasReport = report != null)) {
+            when (DetailPhase.pane(phase, packageName, hasReport = report != null, fileScan = fileScan)) {
                 DetailPane.PROGRESS -> ScanProgressPane(phase as ScanPhase.Running, onCancel)
                 DetailPane.OTHER_SCAN -> OtherScanPane((phase as ScanPhase.Running).job.packageName, onCancel)
                 DetailPane.FAILURE -> FailurePane(
@@ -244,7 +248,9 @@ internal fun DetailsScreen(
                     onSeeAll = onSeeAll,
                     failureMessage = failure?.message ?: cancelled?.let { "Cancelled — showing the last successful report." },
                     storedNote = storedFailure,
-                    runningElsewhere = DetailPhase.runningElsewhere(phase, packageName, hasReport = true),
+                    runningElsewhere = DetailPhase.runningElsewhere(
+                        phase, packageName, hasReport = true, fileScan = fileScan,
+                    ),
                     updatePrompt = updatePrompt,
                     onRescan = onRescan,
                 )
@@ -537,8 +543,8 @@ internal fun rememberScanLog(
     fileScan: Boolean = false,
 ): List<ScanLogEntry> {
     val context = LocalContext.current
-    var entries by remember(packageName) { mutableStateOf<List<ScanLogEntry>>(emptyList()) }
-    LaunchedEffect(packageName, generatedAt) {
+    var entries by remember(packageName, fileScan) { mutableStateOf<List<ScanLogEntry>>(emptyList()) }
+    LaunchedEffect(packageName, fileScan, generatedAt) {
         entries = withContext(Dispatchers.IO) {
             runCatching {
                 val file = ReportFiles.historyFile(ReportFiles.appDir(context), packageName, fileScan)

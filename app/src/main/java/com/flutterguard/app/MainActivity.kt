@@ -181,6 +181,23 @@ internal fun openNotificationSettings(context: android.content.Context) {
 }
 
 /**
+ * Reads the leftover-scan markers and clears them, returning the packages they
+ * named. A package a live scan owns is neither reported nor cleared: that scan
+ * clears its own marker when it finishes.
+ *
+ * Blocking disk work by design — call it from [Dispatchers.IO]. It is also the
+ * first caller of [ReportFiles.appDir], which performs the one-time move of
+ * reports written by builds that still used external storage.
+ */
+private fun sweepInterrupted(context: android.content.Context): List<String> {
+    val dir = ReportFiles.appDir(context)
+    val live = listOfNotNull(ScanStore.state.value.running?.job?.packageName)
+    val found = ReportFiles.interrupted(dir, keep = live)
+    ReportFiles.clearInterrupted(dir, keep = live)
+    return found
+}
+
+/**
  * Navigation + state that must survive screen changes: the inventory, scan
  * state, search, filters and list scroll live here (process stores +
  * rememberSaveable), so Back and rotation neither reload the inventory nor
@@ -264,10 +281,9 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
     LaunchedEffect(Unit) {
         // A leftover marker means the process died mid-scan: say so, never call it a success.
         // A scan that is still running owns its marker, so only stale markers are reported and cleared.
-        val dir = ReportFiles.appDir(context)
-        val live = listOfNotNull(ScanStore.state.value.running?.job?.packageName)
-        interrupted = ReportFiles.interrupted(dir, keep = live)
-        ReportFiles.clearInterrupted(dir, keep = live)
+        // Off the main thread: this first call also performs the one-time move of
+        // reports written by a build that still used external storage.
+        interrupted = withContext(Dispatchers.IO) { sweepInterrupted(context) }
         // The gate above only asks; it does not grant. Enumerate nothing until
         // the user has actually agreed.
         if (settings.inventoryAllowed()) InventoryStore.refresh(context)
@@ -286,10 +302,7 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
             return@LaunchedEffect
         }
         if (runningPkg != null) return@LaunchedEffect
-        val dir = ReportFiles.appDir(context)
-        val live = listOfNotNull(ScanStore.state.value.running?.job?.packageName)
-        interrupted = ReportFiles.interrupted(dir, keep = live)
-        ReportFiles.clearInterrupted(dir, keep = live)
+        interrupted = withContext(Dispatchers.IO) { sweepInterrupted(context) }
     }
 
     // A shared or picked APK: copy it, identify it from its manifest, then hand
@@ -397,7 +410,13 @@ private fun AppNav(notificationsAllowed: Boolean, sharedApk: Uri?, onSharedConsu
                 },
                 onOpenRunning = { pkg ->
                     search = search.collapse()
-                    stack = NavStack.push(stack, Destination.Details(pkg))
+                    // The running job may be a picked APK: its progress lives in
+                    // the `.file` namespace, not the installed app's screen.
+                    val running = ScanStore.state.value.phase as? ScanPhase.Running
+                    stack = NavStack.push(
+                        stack,
+                        Destination.Details(pkg, fileScan = running?.job?.fileScan == true),
+                    )
                 },
                 onCancelScan = { ScanService.cancel(context) },
                 onScanPackage = { pkg ->

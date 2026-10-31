@@ -134,7 +134,13 @@ object Scanner {
      */
     private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
 
-    fun isInstalledPackageName(name: String): Boolean = PACKAGE_NAME.matches(name)
+    /**
+     * 240 leaves room for the longest storage name we build (`<package>.file.json`,
+     * `.file.hist`, `.file.inflight`): 255 is the platform's own limit for the
+     * package name alone, and a 255-char one would fail with ENAMETOOLONG.
+     */
+    fun isInstalledPackageName(name: String): Boolean =
+        name.length <= 240 && PACKAGE_NAME.matches(name)
 
     /**
      * Manifest identity for a file scan. Resource references (`@ref/0x…`, `@string/…`)

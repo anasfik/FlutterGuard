@@ -39,6 +39,37 @@ class DetailPhaseTest {
     private val otherRunning = ScanPhase.Running(ScanJob(4, "com.b", 0))
 
     @Test
+    fun progressAndFailureStayInTheirOwnNamespace() {
+        // A picked APK of com.a is a different artefact from the installed com.a.
+        // Its progress must not replace the installed app's report, and its
+        // failure must not be reported as the installed app's failure.
+        val fileRunning = ScanPhase.Running(ScanJob(11, "com.a", 0, fileScan = true))
+        val fileFailed = ScanPhase.Failed(ScanJob(11, "com.a", 0, fileScan = true), "boom")
+        val installedRunning = ScanPhase.Running(ScanJob(12, "com.a", 0))
+
+        assertEquals(
+            DetailPane.REPORT,
+            DetailPhase.pane(fileRunning, "com.a", hasReport = true, fileScan = false),
+        )
+        assertEquals(
+            DetailPane.PROGRESS,
+            DetailPhase.pane(fileRunning, "com.a", hasReport = true, fileScan = true),
+        )
+        assertEquals(
+            DetailPane.REPORT,
+            DetailPhase.pane(fileFailed, "com.a", hasReport = true, fileScan = false),
+        )
+        assertEquals(
+            DetailPane.FAILURE,
+            DetailPhase.pane(fileFailed, "com.a", hasReport = false, fileScan = true),
+        )
+        assertEquals(
+            DetailPane.PROGRESS,
+            DetailPhase.pane(installedRunning, "com.a", hasReport = false, fileScan = false),
+        )
+    }
+
+    @Test
     fun storedReportIsShownWhenNothingIsInMemory() {
         val stored = report("stored")
         assertEquals("stored", DetailPhase.report(ScanPhase.Idle, null, "com.a", stored)?.meta?.label)
@@ -61,9 +92,16 @@ class DetailPhaseTest {
         // Same package name, different namespace: the in-memory fast path must
         // not hand a picked APK's report to the installed app's route, or the
         // other way round. Otherwise the `.file` namespace is bypassed in RAM.
-        val fileDone = ScanPhase.Done(ScanJob(9, "com.a", 0), report("file").copy(
-            meta = report("file").meta.copy(fileScan = true),
-        ), "/tmp/a.file.json")
+        // The job's flag and the report's flag disagree on purpose: identity comes
+        // from the job that produced the report. If this filtered on
+        // `report.meta.fileScan` instead, the installed route would get the file
+        // report and the first assertion below would fail.
+        val fileDone = ScanPhase.Done(
+            ScanJob(9, "com.a", 0, fileScan = true),
+            report("file"),
+            "/tmp/a.file.json",
+        )
+        assertFalse(fileDone.report.meta.fileScan)
         val installedStored = report("installed")
 
         assertEquals(
@@ -87,7 +125,7 @@ class DetailPhaseTest {
                 fileScan = false,
             )?.meta?.label,
         )
-        assertTrue(fileDone.report.meta.fileScan)
+        assertTrue(fileDone.job.fileScan)
     }
 
     @Test

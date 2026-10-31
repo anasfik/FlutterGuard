@@ -195,7 +195,9 @@ object ScanQueueWaits {
     fun startedJobId(phase: ScanPhase, packageName: String, baselineJobId: Long): Long? =
         (phase as? ScanPhase.Running)
             ?.job
-            ?.takeIf { it.packageName == packageName && it.id > baselineJobId }
+            // An installed-app queue item must not adopt a picked-APK job that
+            // happens to run for the same package name.
+            ?.takeIf { it.packageName == packageName && it.id > baselineJobId && !it.fileScan }
             ?.id
 
     /** Terminal phase belonging to [startedJobId] only. */
@@ -203,8 +205,12 @@ object ScanQueueWaits {
         result(phase, packageName, startedJobId) != null
 
     fun result(phase: ScanPhase, packageName: String, startedJobId: Long): QueueItemState? = when (phase) {
-        is ScanPhase.Done -> if (phase.job.packageName == packageName && phase.job.id == startedJobId) QueueItemState.DONE else null
-        is ScanPhase.Failed -> if (phase.job.packageName == packageName && phase.job.id == startedJobId) QueueItemState.FAILED else null
+        is ScanPhase.Done -> if (phase.job.packageName == packageName && phase.job.id == startedJobId &&
+            !phase.job.fileScan
+        ) QueueItemState.DONE else null
+        is ScanPhase.Failed -> if (phase.job.packageName == packageName && phase.job.id == startedJobId &&
+            !phase.job.fileScan
+        ) QueueItemState.FAILED else null
         is ScanPhase.Cancelled -> if (phase.job.packageName == packageName && phase.job.id == startedJobId) QueueItemState.CANCELLED else null
         else -> null
     }

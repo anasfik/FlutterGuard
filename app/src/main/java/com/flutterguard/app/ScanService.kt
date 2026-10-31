@@ -106,7 +106,7 @@ class ScanService : Service() {
     private fun startJob(packageName: String, headless: Boolean, file: java.io.File?) {
         // The store refuses a second job while any scanner body is still running,
         // even one whose job already failed (timeout/cancel): no overlap, no hiding.
-        val job = ScanStore.start(packageName)
+        val job = ScanStore.start(packageName, fileScan = file != null)
         if (job == null) {
             // No job will own this cache copy, so nothing else would ever delete it.
             file?.let { runCatching { it.delete() } }

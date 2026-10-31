@@ -131,6 +131,8 @@ class FileScanPathTest {
         // The separator Nav.kt joins fields with: accepted, it would forge a
         // second route field and land on the installed app after a restart.
         assertNull(Scanner.fileMeta(manifest("com.example.app\u001Ftrue"), "x"))
+        // 255 bytes is the platform's limit: a longer name cannot become a file name.
+        assertNull(Scanner.fileMeta(manifest("com." + "a".repeat(300)), "x"))
         assertNull(Scanner.fileMeta(manifest("com"), "x"))
         assertNull(Scanner.fileMeta(manifest("9com.example"), "x"))
         assertNull(Scanner.fileMeta(manifest("com..example"), "x"))

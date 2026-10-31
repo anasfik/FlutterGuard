@@ -2,6 +2,7 @@ package com.flutterguard.app.ui
 
 import com.flutterguard.app.scan.Report
 import com.flutterguard.app.scan.ScanPhase
+import com.flutterguard.app.scan.fileScan
 import com.flutterguard.app.scan.packageName
 
 /** Which pane the audit screen shows for one package. */
@@ -31,30 +32,40 @@ object DetailPhase {
         fileScan: Boolean = false,
     ): Report? {
         val live = (phase as? ScanPhase.Done)
-            ?.takeIf { it.job.packageName == packageName && it.report.meta.fileScan == fileScan }
+            ?.takeIf { it.job.packageName == packageName && it.job.fileScan == fileScan }
             ?.report
         val retained = lastSuccess
-            ?.takeIf { it.job.packageName == packageName && it.report.meta.fileScan == fileScan }
+            ?.takeIf { it.job.packageName == packageName && it.job.fileScan == fileScan }
             ?.report
         return live ?: retained ?: stored
     }
 
-    fun pane(phase: ScanPhase, packageName: String, hasReport: Boolean): DetailPane = when {
-        // A scan of this package is the thing to watch, report or not.
-        phase is ScanPhase.Running && phase.job.packageName == packageName -> DetailPane.PROGRESS
+    fun pane(
+        phase: ScanPhase,
+        packageName: String,
+        hasReport: Boolean,
+        fileScan: Boolean = false,
+    ): DetailPane = when {
+        // A scan of this package *in this namespace* is the thing to watch.
+        phase is ScanPhase.Running &&
+            phase.job.packageName == packageName && phase.job.fileScan == fileScan -> DetailPane.PROGRESS
         // Anything else must never hide an existing report.
         hasReport -> DetailPane.REPORT
         phase is ScanPhase.Running -> DetailPane.OTHER_SCAN
         // Another package's failure is not this app's failure: an app that was
         // never scanned must not show "Scan cancelled" / "Could not audit this app".
-        (phase is ScanPhase.Failed || phase is ScanPhase.Cancelled) && phase.packageName == packageName ->
-            DetailPane.FAILURE
+        (phase is ScanPhase.Failed || phase is ScanPhase.Cancelled) &&
+            phase.packageName == packageName && phase.fileScan == fileScan -> DetailPane.FAILURE
         else -> DetailPane.NOT_STARTED
     }
 
     /** Package of a scan running elsewhere, only when a report is already on screen. */
-    fun runningElsewhere(phase: ScanPhase, packageName: String, hasReport: Boolean): String? =
-        (phase as? ScanPhase.Running)
-            ?.takeIf { hasReport && it.job.packageName != packageName }
-            ?.job?.packageName
+    fun runningElsewhere(
+        phase: ScanPhase,
+        packageName: String,
+        hasReport: Boolean,
+        fileScan: Boolean = false,
+    ): String? = (phase as? ScanPhase.Running)
+        ?.takeIf { hasReport && (it.job.packageName != packageName || it.job.fileScan != fileScan) }
+        ?.job?.packageName
 }

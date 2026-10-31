@@ -11,7 +11,17 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /** Identity of one requested scan. Progress/completion messages carry it so stale ones can be dropped. */
-data class ScanJob(val id: Long, val packageName: String, val startedAtMs: Long)
+data class ScanJob(
+    val id: Long,
+    val packageName: String,
+    val startedAtMs: Long,
+    /**
+     * True when the job scans a picked/shared APK rather than the installed app.
+     * Part of the job identity: progress, failure and cancellation of one
+     * namespace must never surface under the other's name.
+     */
+    val fileScan: Boolean = false,
+)
 
 sealed interface ScanPhase {
     data object Idle : ScanPhase
@@ -38,6 +48,16 @@ sealed interface ScanPhase {
 
     data class Cancelled(val job: ScanJob) : ScanPhase
 }
+
+/** Storage namespace this phase belongs to. */
+val ScanPhase.fileScan: Boolean
+    get() = when (this) {
+        is ScanPhase.Running -> job.fileScan
+        is ScanPhase.Done -> job.fileScan
+        is ScanPhase.Failed -> job.fileScan
+        is ScanPhase.Cancelled -> job.fileScan
+        ScanPhase.Idle -> false
+    }
 
 /** Package this phase belongs to, or null for [ScanPhase.Idle]. */
 val ScanPhase.packageName: String?
@@ -76,6 +96,7 @@ object ScanStartPolicy {
         packageName: String,
         queueActive: Boolean = false,
         hasReport: Boolean = false,
+        fileScan: Boolean = false,
     ): Boolean = when {
         // The queue is the single mutator of the slot while it runs.
         queueActive -> false
@@ -84,7 +105,8 @@ object ScanStartPolicy {
         phase is ScanPhase.Idle -> true
         // One scan at a time; the caller re-evaluates when the other scan ends.
         phase is ScanPhase.Running -> false
-        else -> phase.packageName != packageName
+        // A finished scan of the other namespace says nothing about this one.
+        else -> phase.packageName != packageName || phase.fileScan != fileScan
     }
 }
 
@@ -181,9 +203,13 @@ object ScanStore {
      * running or when an abandoned scan body is still winding down.
      */
     @Synchronized
-    fun start(packageName: String, now: Long = System.currentTimeMillis()): ScanJob? {
+    fun start(
+        packageName: String,
+        now: Long = System.currentTimeMillis(),
+        fileScan: Boolean = false,
+    ): ScanJob? {
         if (_state.value.running != null || _executing.value != null) return null
-        val job = ScanJob(ids.incrementAndGet(), packageName, now)
+        val job = ScanJob(ids.incrementAndGet(), packageName, now, fileScan)
         val (next, accepted) = _state.value.start(job)
         if (!accepted) return null
         _state.value = next
