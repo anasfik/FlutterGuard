@@ -84,6 +84,9 @@ Demo video — 30-60 s recording, one take is fine:
 3. If Play asks about country selection on the update, keep the countries
    0.3.2 already has; the API rejects new `countryTargeting` on a `completed`
    release (table in section 3).
+4. **Upload the R8 mapping file** with the release — Android Studio, or
+   *Release → App bundle explorer → mapping file*. Without it Play reports
+   obfuscated stack traces and a crash cannot be attributed to a line.
 
 ## 3. Why the first production release has to be made in Console
 
