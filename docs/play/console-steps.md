@@ -1,95 +1,96 @@
 # Play Console steps for FlutterGuard 0.3.2 (versionCode 7)
 
-Everything here is the part the Android Publisher API cannot do. The API is
-already wired up: service account `reqistry-fastlane@reqistry-play-deployment.iam.gserviceaccount.com`
-can open edits on `com.flutterguard.app` (tracks: internal, alpha, beta, production).
+Everything the Play Developer API can do is already done. What is left is
+Console-only by Google's design: App content declarations, a store category,
+and the first publish. There is no API for any of them.
 
-## 1. App signing
+## Already done — do not redo
 
-**Test and release → Setup → App signing** → *Use Play App Signing*, and upload
-`~/motoledger-upload.jks` as the **upload key** (alias `motoledger`).
+| Item | State |
+| --- | --- |
+| Play App Signing | Enrolled, Google-generated app signing key |
+| Upload key | `~/motoledger-upload.jks`, alias `motoledger`, cert `7350A257…EBBEB1BF` |
+| AAB | versionCode 7, sha256 `51b876c391b3469ebd846ce08f800bd97a50bc7f0d9e2a58698c9eaa3f453e62` |
+| Internal testing | release 7, **completed** |
+| Production | release 7, **draft** — the one waiting on this checklist |
+| Listing | title, 65-char short description, 2955-char full description, icon, feature graphic, 6 screenshots |
 
-The certificate must stay
+Verify any of it with:
 
+```bash
+python3 docs/play/upload.py --key <service-account.json> status
 ```
-SHA-256 7350A257DF573946D83C1DFEB1124C3E35E8CA59EB175972300B2600EBBEB1BF
-```
 
-because that is the key the already-sideloaded installs trust: same key means
-FlutterGuard keeps updating in place, and reports on disk stay readable.
-Play App Signing re-signs downloads with Google's key, which is fine — only the
-upload key has to match.
+## 1. App content — Play will not review without these
 
-## 2. App content (required before any release leaves draft)
+Publishing overview lists them. Answers that match the shipped build:
 
-| Section | Answer |
-|---|---|
-| Privacy policy | `https://gwhyyy.com/privacy/flutterguard` (security appendix: `…/flutterguard/security`) |
-| App access | All functionality available without credentials |
+| Form | Answer |
+| --- | --- |
+| Privacy policy | `https://gwhyyy.com/privacy/flutterguard` |
+| App access | All functionality available without special access — no login, no account |
 | Ads | No ads |
-| Content rating | Questionnaire: Utility / Security. No violence, no user content, no sharing, no purchases |
-| Target audience | 18+ (developer tool), not designed for children |
-| Data safety | **No data collected, no data shared.** Everything is read and reported on-device; the app holds no INTERNET permission |
-| Government apps | No |
-| Financial features | None |
-| Health | None |
+| Content rating questionnaire | Tools; no violence, sex, drugs, gambling, or user-generated content; no user interaction; no location sharing |
+| Target audience | 18 and over (a developer tool, not a Families app) |
+| Data safety | **No data collected, no data shared** — the app has no `INTERNET` permission, no analytics, no account |
+| Government app / financial features / health / news | No to all |
+| Category | Tools |
+| Tags | Security, Developer tools |
 
-**Permissions declaration → `QUERY_ALL_PACKAGES`.** Justification, which matches
-the in-app first-run disclosure and code:
+`QUERY_ALL_PACKAGES` declaration — permitted use: device search / security.
+Justification to paste:
 
-> FlutterGuard's single purpose is auditing the Flutter apps already installed on
-> the user's device: it reads each app's manifest, signing certificate, native
-> libraries, embedded strings and network rules, and produces a local security
-> report. Without package visibility the app cannot enumerate what to audit, which
-> is its core disclosed function (Google Play's "device search" / "security"
-> permitted use). Every installed-app scan is gated behind a first-run disclosure
-> and a Settings toggle; the user can also audit a single APK through the system
-> file picker without this permission. No app inventory leaves the device — the
-> app has no INTERNET permission.
+> FlutterGuard is an on-device security tool. It lists the Flutter apps
+> installed on the user's own device so the user can audit them, and it reads
+> each app's APK locally to report SDKs, permissions, signing identity and
+> embedded secrets. The permission is disclosed on first run and is only used
+> after the user agrees; declining keeps the app usable through a
+> file-picker path that scans a single APK. The app has no `INTERNET`
+> permission, so nothing it reads can leave the device.
 
-**Foreground service declaration → type `dataSync`.** targetSdk 36 rejects the
-upload without it.
+Foreground service (`dataSync`) declaration — the scan is local file
+processing and reports progress so the user can leave the app mid-scan:
 
-- Task: "Reads the APK files of installed apps on the device and scans them for
-  embedded SDKs, endpoints, secrets and manifest weaknesses. The work is local
-  file I/O and string matching; there is no network access."
-- Why a foreground service: a scan of one app takes 30–90 s and "Scan all" runs
-  33 apps back to back. It must survive the screen turning off or the user leaving
-  the app, must show progress, and must stay cancellable. WorkManager cannot give
-  either the live progress or the immediate cancel.
-- Video (30–60 s, one take is fine):
-  1. Open FlutterGuard, tap a Flutter app.
-  2. Pull down the notification shade — the progress notification is there with a
-     percentage and the current stage.
-  3. Press Home, wait a few seconds, reopen the shade — the percentage advanced.
-  4. Reopen the app, tap **Cancel scan** — the scan stops and the notification
-     disappears.
+> FlutterGuard runs a short, user-initiated `dataSync` foreground service
+> while it audits one APK on the device (30-90 seconds). It shows progress in a
+> notification, and cancelling the notification or the button stops the scan.
+> No data leaves the device; the app has no network permission.
 
-## 3. Upload
+Demo video — 30-60 s recording, one take is fine:
 
-```sh
-export PLAY_SA_JSON=~/drive-backup-ffikhi/reqistry-play-deployment-f666e85817ff.json
-cd docs/play
-./upload.py listing --short "Offline security audit for the Flutter apps on your phone." \
-                    --full-file full-description.txt
-./upload.py images  --type phoneScreenshots --files screenshots/*.png
-./upload.py images  --type icon            --files icon-512.png
-./upload.py images  --type featureGraphic  --files feature-1024x500.png
-./upload.py bundle --aab ../app/build/outputs/bundle/release/app-release.aab \
-                   --track internal --status completed \
-                   --notes-file release-notes-0.3.2.txt
-```
+1. Open FlutterGuard, tap any app in the list.
+2. Pull down the notification shade: the progress notification is visible.
+3. Press Home, reopen the shade: progress has advanced.
+4. Return to the app and press **Cancel scan**: it stops.
 
-Start on **internal**, install from the Play link on the test device, then promote
-to closed testing. Production only after the internal install has been opened once
-and a scan has run.
+## 2. Publish
 
-## 4. Facts to keep straight while filling forms
+1. **Publishing overview** — confirm every App content item reads *Complete*.
+2. **Production → Releases** — the draft release `0.3.2 (7)` is there with its
+   release notes. If Console asks you to review it, the only thing to check is
+   that it says versionCode 7.
+3. **Send for review** (or *Start rollout to Production*).
 
-- No network: the release APK declares `QUERY_ALL_PACKAGES`, `FOREGROUND_SERVICE`,
-  `FOREGROUND_SERVICE_DATA_SYNC`, `POST_NOTIFICATIONS` and nothing else.
-- Reports are stored in internal app storage (`files/reports/<package>.json`) and
-  leave only through Share, on an explicit tap.
-- Secrets found in an APK are masked by default; revealing one is per-item and
-  blocks screenshots (`FLAG_SECURE`).
-- The app does not train models, does not upload samples, has no accounts.
+If Console shows a **Production access** banner instead, the developer account
+is a personal account that still owes the closed-testing requirement (12
+testers for 14 continuous days). That gate is account-level; nothing in the
+build can satisfy it.
+
+## 3. After the first publish
+
+The API takes over completely: future bundles, tracks, rollouts and listing
+edits all work, because the app is no longer a draft app. Until then, a
+production release can only be created as `draft` — Play rejects `completed`
+with `Only releases with status draft may be created on draft app`.
+
+## 4. Facts to keep straight
+
+- **Signing key differs.** Play now signs installs with Google's app signing
+  key, not the `7350A257…` upload certificate the GitHub APKs and 33
+  sideloaded devices use. Those devices need one uninstall before installing
+  from Play; the GitHub APK keeps working as before.
+- **The grade is triage, not a verdict.** Static matches are evidence; the
+  listing copy and the app both say so. Never describe it as malware
+  detection.
+- **No network permission** is a shippable fact, not marketing: `aapt2 dump
+  permissions` on the release APK lists no `INTERNET`.

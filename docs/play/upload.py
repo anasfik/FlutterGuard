@@ -170,6 +170,45 @@ class Play:
             )
         print(f"{len(files)} {image_type} uploaded for {lang}")
 
+    def set_track(self, track: str, versions, status: str, notes: str = "", user_fraction=None):
+        """Point a track at an existing bundle. No upload, no listing change."""
+        edit = self.open_edit()
+        release = {"versionCodes": [str(v) for v in versions], "status": status}
+        if notes:
+            release["releaseNotes"] = [{"language": "en-US", "text": notes[:500]}]
+        if status == "inProgress":
+            release["userFraction"] = user_fraction if user_fraction is not None else 0.1
+        self.call(
+            "PUT",
+            f"{API}/applications/{self.pkg}/edits/{edit}/tracks/{track}",
+            {"track": track, "releases": [release]},
+        )
+        print(f"track {track}: {release['versionCodes']} -> {status}")
+
+    def status(self):
+        """Print what Play actually holds. Reads only: the edit is abandoned."""
+        edit = self.open_edit()
+        bundles = self.call("GET", f"{API}/applications/{self.pkg}/edits/{edit}/bundles")
+        got = bundles.get("bundles", [])
+        print("bundles:", [(b["versionCode"], b["sha256"][:12]) for b in got] or "none")
+        for t in self.call("GET", f"{API}/applications/{self.pkg}/edits/{edit}/tracks").get("tracks", []):
+            rel = t.get("releases") or []
+            if not rel:
+                print(f"  {t['track']}: no releases")
+            for r in rel:
+                print(f"  {t['track']}: {r.get('versionCodes')} {r.get('status')} "
+                      f"{r.get('userFraction', '-')} notes={len(r.get('releaseNotes', []))}")
+        base = f"{API}/applications/{self.pkg}/edits/{edit}/listings/en-US"
+        listing = self.call("GET", base)
+        print(f"listing: {listing.get('title')} · "
+              f"{len(listing.get('shortDescription', ''))} short · "
+              f"{len(listing.get('fullDescription', ''))} full")
+        for kind in ("icon", "featureGraphic", "phoneScreenshots"):
+            n = len(self.call("GET", f"{base}/{kind}").get("images", []))
+            print(f"  {kind}: {n}")
+        self.call("DELETE", f"{API}/applications/{self.pkg}/edits/{edit}")
+        self.edit = None
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -195,6 +234,15 @@ def main():
     i.add_argument("--type", default="phoneScreenshots")
     i.add_argument("--files", nargs="+", required=True)
 
+    p = sub.add_parser("promote", help="point a track at a bundle already uploaded")
+    p.add_argument("--track", default="production")
+    p.add_argument("--versions", nargs="+", required=True)
+    p.add_argument("--status", default="completed", choices=["draft", "completed", "inProgress"])
+    p.add_argument("--fraction", type=float)
+    p.add_argument("--notes-file")
+
+    sub.add_parser("status", help="print what Play actually holds; commits nothing")
+
     a = ap.parse_args()
     if not a.key:
         sys.exit("set PLAY_SA_JSON or pass --key")
@@ -210,6 +258,12 @@ def main():
     elif a.cmd == "listing":
         full = pathlib.Path(a.full_file).read_text() if a.full_file else None
         play.set_listing(a.lang, a.title, a.short, full)
+    elif a.cmd == "promote":
+        notes = pathlib.Path(a.notes_file).read_text() if a.notes_file else ""
+        play.set_track(a.track, a.versions, a.status, notes, a.fraction)
+    elif a.cmd == "status":
+        play.status()
+        return
     else:
         play.set_images(a.lang, a.type, a.files)
 
