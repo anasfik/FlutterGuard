@@ -12,8 +12,10 @@ android {
         applicationId = "com.flutterguard.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.3.2"
+        // 0.3.2 (code 7) is the first Play release and is under review; this
+        // is the immediate follow-up once it is approved.
+        versionCode = 8
+        versionName = "0.3.3"
     }
 
     signingConfigs {
@@ -43,7 +45,12 @@ android {
             versionNameSuffix = "-dev"
         }
         release {
-            isMinifyEnabled = false
+            // Play measures DEX optimisation per build type and warns when
+            // obfuscation stays under 25%; this is that requirement, and it
+            // also cuts the 13.5 MB unshrunken classes dex. Verified on device
+            // after every change (see CORPUS.md for the scan smoke test).
+            isMinifyEnabled = true
+            isShrinkResources = true
             // Release gate: lint must pass (no errors) on every release build.
             // The remaining warnings are informational: pinned dependency
             // updates, lint's own notion of "latest targetSdk", and the -v26

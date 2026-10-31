@@ -1,0 +1,5 @@
+Smaller, faster, and easier to trust.
+
+• Code shrinking and obfuscation: the app is about five times smaller and starts faster.
+• Less code and fewer resources in memory while a scan runs.
+• Unchanged otherwise: audits every Flutter app A–F from the APK itself, reports SDKs, AI providers, endpoints, routes, secrets, signing, network security and permissions, picks single APKs too, masks secrets until you reveal them, fully offline with no network permission, no analytics and no account.

@@ -170,10 +170,20 @@ class Play:
             )
         print(f"{len(files)} {image_type} uploaded for {lang}")
 
-    def set_track(self, track: str, versions, status: str, notes: str = "", user_fraction=None):
+    def set_track(self, track: str, versions, status: str, notes: str = "",
+                  user_fraction=None, all_countries: bool = False):
         """Point a track at an existing bundle. No upload, no listing change."""
+        if all_countries and status != "inProgress":
+            # Play answers `Country targeting is only supported for staged
+            # releases` for a completed one, and an empty-country release is
+            # rejected at commit — so targeting can only be set while staged.
+            sys.exit("--all-countries requires --status inProgress")
         edit = self.open_edit()
         release = {"versionCodes": [str(v) for v in versions], "status": status}
+        if all_countries:
+            # Play rewrites "every country" into the full 177-code list, which
+            # is why reading a track back shows both the codes and this flag.
+            release["countryTargeting"] = {"countries": [], "includeRestOfWorld": True}
         if notes:
             release["releaseNotes"] = [{"language": "en-US", "text": notes[:500]}]
         if status == "inProgress":
@@ -239,6 +249,7 @@ def main():
     p.add_argument("--versions", nargs="+", required=True)
     p.add_argument("--status", default="completed", choices=["draft", "completed", "inProgress"])
     p.add_argument("--fraction", type=float)
+    p.add_argument("--all-countries", action="store_true")
     p.add_argument("--notes-file")
 
     sub.add_parser("status", help="print what Play actually holds; commits nothing")
@@ -260,7 +271,7 @@ def main():
         play.set_listing(a.lang, a.title, a.short, full)
     elif a.cmd == "promote":
         notes = pathlib.Path(a.notes_file).read_text() if a.notes_file else ""
-        play.set_track(a.track, a.versions, a.status, notes, a.fraction)
+        play.set_track(a.track, a.versions, a.status, notes, a.fraction, a.all_countries)
     elif a.cmd == "status":
         play.status()
         return

@@ -1,8 +1,9 @@
-# Play Console steps for FlutterGuard 0.3.2 (versionCode 7)
+# Play Console steps for FlutterGuard 0.3.3 (versionCode 8)
 
-Everything the Play Developer API can do is already done. What is left is
-Console-only by Google's design: App content declarations, a store category,
-and the first publish. There is no API for any of them.
+0.3.2 (versionCode 7) is submitted and under review. 0.3.3 (versionCode 8) is
+the compliance update: R8 minification and resource shrinking, built and
+device-verified, ready to upload the moment 0.3.2 is approved. The App content
+answers below are unchanged and already filed.
 
 ## Already done — do not redo
 
@@ -10,9 +11,11 @@ and the first publish. There is no API for any of them.
 | --- | --- |
 | Play App Signing | Enrolled, Google-generated app signing key |
 | Upload key | `~/motoledger-upload.jks`, alias `motoledger`, cert `7350A257…EBBEB1BF` |
-| AAB | versionCode 7, sha256 `51b876c391b3469ebd846ce08f800bd97a50bc7f0d9e2a58698c9eaa3f453e62` |
+| 0.3.2 (7) AAB | sha256 `51b876c391b3469ebd846ce08f800bd97a50bc7f0d9e2a58698c9eaa3f453e62`, submitted for review |
+| 0.3.3 (8) AAB | sha256 `3792f4c638cc0f9c5910843abbde3f49936247fe0f5b00acea7922f993505f8f`, not uploaded yet |
 | Internal testing | release 7, **completed** |
-| Production | release 7, **draft** — the one waiting on this checklist |
+| Closed testing (alpha) | release 7, **completed**, 177 countries + rest of world |
+| Production | release 7, **completed**, in review |
 | Listing | title, 65-char short description, 2955-char full description, icon, feature graphic, 6 screenshots |
 
 Verify any of it with:
@@ -63,18 +66,24 @@ Demo video — 30-60 s recording, one take is fine:
 3. Press Home, reopen the shade: progress has advanced.
 4. Return to the app and press **Cancel scan**: it stops.
 
-## 2. Publish
+## 2. Publish 0.3.3 once 0.3.2 is approved
 
-1. **Publishing overview** — confirm every App content item reads *Complete*.
-2. **Production → Releases** — the draft release `0.3.2 (7)` is there with its
-   release notes. If Console asks you to review it, the only thing to check is
-   that it says versionCode 7.
-3. **Send for review** (or *Start rollout to Production*).
+1. **Publishing overview** — confirm 0.3.2 reads *Approved* / *Published*.
+2. Upload the update — either Console (**Production → Create new release →
+   Upload → `app/build/outputs/bundle/release/app-release.aab`**) or the API:
 
-If Console shows a **Production access** banner instead, the developer account
-is a personal account that still owes the closed-testing requirement (12
-testers for 14 continuous days). That gate is account-level; nothing in the
-build can satisfy it.
+   ```bash
+   python3 docs/play/upload.py --key <service-account.json> bundle \
+       --aab app/build/outputs/bundle/release/app-release.aab \
+       --track production --status completed \
+       --notes-file docs/play/release-notes-0.3.3.txt
+   ```
+
+   The runbook `status` command reports exactly which versionCode each track
+   holds, so verify `production: ['8'] completed` afterwards.
+3. If Play asks about country selection on the update, keep the countries
+   0.3.2 already has; the API rejects new `countryTargeting` on a `completed`
+   release (table in section 3).
 
 ## 3. Why the first production release has to be made in Console
 
