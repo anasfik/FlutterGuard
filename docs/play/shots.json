@@ -1,0 +1,76 @@
+[
+ {
+  "raw": "raw-home.png",
+  "slug": "01-inventory",
+  "title": "Every Flutter app <em>on your phone</em>",
+  "sub": "Detected from APK contents, not a manifest flag. 33 of 306 installed apps here, with no root and no PC.",
+  "chips": [
+   "33 Flutter apps",
+   "No root",
+   "No PC"
+  ]
+ },
+ {
+  "raw": "raw-overview.png",
+  "slug": "02-grade",
+  "title": "A graded report, <em>with the reason</em>",
+  "sub": "Severity counts, artifact facts and the full base-APK SHA-256. The grade always states why it was awarded.",
+  "chips": [
+   "Grade F, stated reason",
+   "Full SHA-256",
+   "0 critical \u00b7 5 high"
+  ]
+ },
+ {
+  "raw": "raw-findings.png",
+  "slug": "03-findings",
+  "title": "Evidence, <em>not guesswork</em>",
+  "sub": "Every finding names the pattern that matched and the artifact it came from. A match is a lead, not proof of exploitability.",
+  "chips": [
+   "Named pattern",
+   "Masked by default",
+   "Provenance"
+  ]
+ },
+ {
+  "raw": "raw-services.png",
+  "slug": "04-services",
+  "title": "See the SDKs <em>and AI providers</em>",
+  "sub": "This one app carried markers for 32 services, including OpenAI, Anthropic, Gemini, DeepSeek and OpenRouter.",
+  "cropTop": 940,
+  "chips": [
+   "Firebase",
+   "Play Services",
+   "OpenAI",
+   "Anthropic",
+   "Gemini",
+   "DeepSeek",
+   "OpenRouter"
+  ],
+  "phoneWidth": 880
+ },
+ {
+  "raw": "raw-settings.png",
+  "slug": "05-settings",
+  "title": "You decide <em>what it can do</em>",
+  "sub": "Consent, secret reveal, sensitive exports, scan history and deletion are switches, not promises.",
+  "chips": [
+   "Consent",
+   "Reveal",
+   "Exports",
+   "History",
+   "Delete all"
+  ]
+ },
+ {
+  "raw": "raw-privacy.png",
+  "slug": "06-privacy",
+  "title": "Offline <em>by design</em>",
+  "sub": "No INTERNET permission, so nothing can leave the phone. The full policy ships inside the app.",
+  "chips": [
+   "No INTERNET",
+   "No telemetry",
+   "Offline"
+  ]
+ }
+]

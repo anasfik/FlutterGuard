@@ -1,0 +1,106 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlutterGuard — Security</title>
+<style>
+ :root{--bg:#0B1219;--fg:#E6F1F7;--muted:#8FB3C7;--accent:#22D3EE;--line:rgba(148,233,255,.16)}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+ main{max-width:760px;margin:0 auto;padding:56px 22px 96px}
+ header{display:flex;align-items:center;gap:12px;margin-bottom:34px}
+ .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#22D3EE,#0E7490)}
+ .name{letter-spacing:.14em;text-transform:uppercase;font-size:13px;color:var(--muted)}
+ h1{font-size:34px;line-height:1.2;margin:0 0 6px;letter-spacing:-.5px}
+ h2{font-size:21px;margin:36px 0 10px;padding-top:18px;border-top:1px solid var(--line)}
+ h3{font-size:17px;margin:24px 0 6px}
+ p,li{color:var(--fg)}
+ a{color:var(--accent)}
+ code{background:rgba(34,211,238,.10);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:14px}
+ ul{padding-left:20px} li{margin:6px 0}
+ .meta{color:var(--muted);font-size:14px;margin:0 0 8px}
+ footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+</style></head><body><main>
+<header><div class="mark"></div><div class="name">FlutterGuard</div></header>
+<h1>FlutterGuard security model</h1>
+<p>Effective date: 2026-10-30</p>
+<p>FlutterGuard performs static analysis of Android APK artifacts on the device. It
+is a reading tool: it does not run, install, modify, or attack the applications
+it inspects. This document describes the boundaries it enforces and the limits
+you should assume.</p>
+<h2>Network boundary</h2>
+<p>The app declares no <code>INTERNET</code> permission. Without it the Android kernel denies
+socket creation to the app process, so no scanner result, report content, or
+secret can leave the device through FlutterGuard itself.</p>
+<p>External documentation links open in another app only after an explicit tap. The
+destination app has its own permissions and privacy policy; FlutterGuard only
+hands it a URL.</p>
+<h2>What is read</h2>
+<ul>
+<li>Android's package manager metadata for installed applications (with your
+  consent), including labels, versions, SDK levels, and signing certificates.</li>
+<li>The APK files the OS exposes for an app you choose: base APK and split APKs.</li>
+<li>The APK you pick or share in file mode, and nothing else.</li>
+</ul>
+<p>Static parsers read the manifest, resources, DEX string tables, native library
+strings, archive entries, and signing blocks. Parsing is bounded: previews are
+capped, oversized entries are skipped, entry names are validated, and no archive
+path is ever extracted to the filesystem or executed.</p>
+<h2>What is never done</h2>
+<ul>
+<li>No network request of any kind: no telemetry, analytics, ads, or crash upload.</li>
+<li>No dynamic analysis, instrumentation, or code execution of the scanned app.</li>
+<li>No modification of the scanned APK or of the app it belongs to.</li>
+<li>No background collection: a scan runs only when you start it or grant a
+  scripted request you invoked yourself.</li>
+<li>No raw secrets in reports, exports, history, notifications, or logs.</li>
+</ul>
+<h2>Secret handling</h2>
+<p>Findings that look like credentials are masked by default. A mask reveals only
+the length, never characters. Revealing a value is an explicit action, is
+restricted to the current visit, and marks the window secure for screenshots
+(<code>FLAG_SECURE</code>) while the value is visible.</p>
+<p>Raw values are retained only in the memory of the scanning process. They are not
+serialized: a report reopened from disk can show its masked evidence but not the
+original value. To reveal values again, rescan the app.</p>
+<p>Exports are redacted by default. Raw values are written only when you confirm the
+sensitive option for that specific file; turning the setting off removes the
+option entirely.</p>
+<h2>Storage and sharing</h2>
+<ul>
+<li>Reports and history live in the app's own storage directory. Android gives
+  other apps no general access to it, and removing FlutterGuard removes it.</li>
+<li>Exports are written to the app cache and handed to the share sheet through a
+  <code>FileProvider</code> declared <code>exported="false"</code> with per-URI read grants.</li>
+<li>Imported APKs are copied into the app cache for the duration of the scan and
+  deleted afterwards.</li>
+</ul>
+<p>Anyone who can read the device's storage with root, debug access, or a backup
+mechanism can read stored reports. FlutterGuard disables Android backup for its
+data, but it cannot defend against a compromised device or a rooted OS.</p>
+<h2>Permission set</h2>
+<ul>
+<li><code>QUERY_ALL_PACKAGES</code>: broad package visibility, requested so installed apps
+  can be listed for auditing. It is an optimisation for convenience, not a
+  requirement: file-pick and share-import scans work without it.</li>
+<li><code>FOREGROUND_SERVICE</code>, <code>FOREGROUND_SERVICE_DATA_SYNC</code>: a foreground service
+  owns the single running scan and shows honest progress.</li>
+<li><code>POST_NOTIFICATIONS</code>: optional progress and result notifications.</li>
+</ul>
+<p>There is no storage, location, contacts, camera, microphone, or network
+permission in the manifest.</p>
+<h2>Known limitations</h2>
+<ul>
+<li>Static matches are evidence and hypotheses, not proof of exploitability.</li>
+<li>Obfuscation, packing, and encrypted payloads can hide behavior from static
+  analysis.</li>
+<li>A ROM or device policy that blocks reading another app's APK makes installed-app
+  scans fail visibly; the file-pick path remains available.</li>
+<li>Dynamic configuration, server-supplied endpoints, and runtime-generated keys
+  are not observable from the artifact alone.</li>
+</ul>
+<h2>Reporting a vulnerability in FlutterGuard</h2>
+<p>Report security issues privately through the project repository at
+https://github.com/anasfik/FlutterGuard. Include the affected version, steps to
+reproduce, and the impact you observed. Please do not include real credentials
+or third-party user data in a report.</p>
+<footer>FlutterGuard · <a href="security.html">Security model</a> · <a href="privacy.html">Privacy policy</a></footer>
+</main></body></html>

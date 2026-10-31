@@ -1,0 +1,116 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlutterGuard — Privacy</title>
+<style>
+ :root{--bg:#0B1219;--fg:#E6F1F7;--muted:#8FB3C7;--accent:#22D3EE;--line:rgba(148,233,255,.16)}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+ main{max-width:760px;margin:0 auto;padding:56px 22px 96px}
+ header{display:flex;align-items:center;gap:12px;margin-bottom:34px}
+ .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#22D3EE,#0E7490)}
+ .name{letter-spacing:.14em;text-transform:uppercase;font-size:13px;color:var(--muted)}
+ h1{font-size:34px;line-height:1.2;margin:0 0 6px;letter-spacing:-.5px}
+ h2{font-size:21px;margin:36px 0 10px;padding-top:18px;border-top:1px solid var(--line)}
+ h3{font-size:17px;margin:24px 0 6px}
+ p,li{color:var(--fg)}
+ a{color:var(--accent)}
+ code{background:rgba(34,211,238,.10);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:14px}
+ ul{padding-left:20px} li{margin:6px 0}
+ .meta{color:var(--muted);font-size:14px;margin:0 0 8px}
+ footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+</style></head><body><main>
+<header><div class="mark"></div><div class="name">FlutterGuard</div></header>
+<h1>FlutterGuard privacy policy</h1>
+<p>Effective date: 2026-10-30
+Policy version: 1</p>
+<p>FlutterGuard is an offline static-analysis tool for Android applications, with a
+focus on Flutter artifacts. This policy describes exactly what the app reads,
+what it stores, and what it never does.</p>
+<h2>Summary</h2>
+<ul>
+<li>FlutterGuard has no network permission. It cannot send anything anywhere.</li>
+<li>No accounts, no telemetry, no analytics, no advertising, no crash reporting.</li>
+<li>Reports stay in FlutterGuard's own app-specific storage until you delete them.</li>
+<li>Files leave the app only when you explicitly export and choose a destination.</li>
+</ul>
+<h2>What the app reads</h2>
+<p>With your consent, FlutterGuard lists installed applications through Android's
+package manager. The <code>QUERY_ALL_PACKAGES</code> permission exists solely so the app can
+offer installed Android apps for an audit. For an app you choose to scan, it
+reads the APK files Android exposes for that app (the base APK and its split
+APKs) and parses them on the device: the manifest, resources, DEX string tables,
+native libraries, bundled assets, and signing information. No application code
+is executed.</p>
+<p>If you decline broad package visibility, or if the permission is unavailable,
+you can still audit an APK you pick with the system file picker, or share an APK
+to FlutterGuard from another app such as Files. In that mode FlutterGuard reads
+only the file you supplied and copies it to its private cache for the duration of
+the scan.</p>
+<h2>What is collected and transmitted</h2>
+<p>Nothing is transmitted. FlutterGuard declares no <code>INTERNET</code> permission, so the
+operating system denies it network access entirely.</p>
+<p>The app creates the following data on your device:</p>
+<ul>
+<li>A scan report (JSON) per audited package in its app-specific storage.</li>
+<li>An optional version history log per audited package (<code>.hist</code>) used to compare
+  scans of different app versions. You can turn this off in Settings.</li>
+<li>Temporary export files in the app cache when you export a report.</li>
+<li>A temporary copy of an imported APK in the app cache, deleted when the scan
+  ends.</li>
+</ul>
+<p>No usage statistics, device identifiers, installed-app list, or report content
+is collected by the maintainer. There is no server component.</p>
+<h2>What is shared</h2>
+<p>Nothing is shared automatically. A report leaves the device only when you press
+Export and then choose a destination app in Android's share sheet. The export is
+delivered through a non-exported <code>FileProvider</code> that grants read access to the
+single file for that one share. Other apps cannot browse FlutterGuard's storage.</p>
+<p>Exports are redacted by default. Values that look like credentials are replaced
+with a length-only mask such as <code>[32 chars hidden]</code>. Writing raw values into an
+export requires an explicit raw-value opt-in and confirmation for that one file,
+and the option can be disabled entirely in Settings.</p>
+<h2>Secret handling</h2>
+<p>Detected secrets are masked in the UI by default. Revealing a value is an
+explicit per-item action; while a value is revealed the screen is marked secure
+so it is excluded from screenshots and the recents preview. Raw values exist only
+in the memory of the scanning process: they are not written to reports, history,
+exports, or logs, and they disappear when the process ends.</p>
+<h2>Scan execution</h2>
+<p>Scans run in a foreground service with a progress notification, so leaving the
+app does not silently cancel or duplicate work. Notification permission is
+optional: without it the scan still runs, but Android hides its progress and
+result notifications.</p>
+<h2>Retention and deletion</h2>
+<p>Reports and history remain on the device until you delete them.</p>
+<ul>
+<li>Settings → Delete all reports removes every stored report, history log, and
+  interrupted-scan marker.</li>
+<li>Uninstalling FlutterGuard removes its app-specific storage, including reports.</li>
+<li>Exported files are owned by the app you shared them with and must be deleted
+  there.</li>
+</ul>
+<h2>Permissions</h2>
+<ul>
+<li><code>QUERY_ALL_PACKAGES</code>: list installed apps so you can choose one to audit.</li>
+<li><code>FOREGROUND_SERVICE</code> and <code>FOREGROUND_SERVICE_DATA_SYNC</code>: run a scan reliably
+  while you use another app.</li>
+<li><code>POST_NOTIFICATIONS</code> (Android 13+): show scan progress and result
+  notifications. Optional.</li>
+</ul>
+<p>FlutterGuard requests no storage, location, contacts, camera, microphone, or
+network permission.</p>
+<h2>Children</h2>
+<p>FlutterGuard is a developer and researcher tool. It is not directed at children
+and collects no personal information from anyone.</p>
+<h2>Changes</h2>
+<p>Material changes to this policy bump the policy version shown at the top. When
+the stored consent is older than the current version, FlutterGuard shows the
+disclosure again before reading the installed-app list.</p>
+<h2>Contact</h2>
+<p>FlutterGuard is maintained in the open at
+https://github.com/anasfik/FlutterGuard. Questions or corrections can be raised
+as an issue there, or sent by email to work@gwhyyy.com.</p>
+<p>The developer address for privacy requests and store listings is
+work@gwhyyy.com.</p>
+<footer>FlutterGuard · <a href="security.html">Security model</a> · <a href="privacy.html">Privacy policy</a></footer>
+</main></body></html>

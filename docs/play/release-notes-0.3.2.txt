@@ -1,0 +1,8 @@
+First Play release.
+
+• Audits every Flutter app on the device and grades it A–F from the APK itself.
+• Reports what each app ships: third-party SDKs, AI providers, endpoints, routes, secrets, signing, network security, permissions.
+• Picks up single APKs too — pick or share one and get the same report.
+• Secrets are masked until you reveal them, and revealing one blocks screenshots.
+• Works entirely offline: no network permission, no analytics, no account.
+• Full privacy policy and security model are readable in Settings.
