@@ -84,8 +84,10 @@ class Play:
         return self.edit
 
     def commit(self):
+        # Never cancel and resubmit an existing review (the API's default).
         r = self.call(
             "POST", f"{API}/applications/{self.pkg}/edits/{self.open_edit()}:commit"
+            "?changesInReviewBehavior=ERROR_IF_IN_REVIEW"
         )
         self.edit = None
         return r
@@ -208,6 +210,11 @@ class Play:
             for r in rel:
                 print(f"  {t['track']}: {r.get('versionCodes')} {r.get('status')} "
                       f"{r.get('userFraction', '-')} notes={len(r.get('releaseNotes', []))}")
+            if rel:
+                lifecycle = self.call("GET", f"{API}/applications/{self.pkg}/tracks/{t['track']}/releases")
+                for r in lifecycle.get("releases", []):
+                    versions = [a.get("versionCode") for a in r.get("activeArtifacts", [])]
+                    print(f"    lifecycle: {versions} {r.get('releaseLifecycleState', 'UNKNOWN')}")
         base = f"{API}/applications/{self.pkg}/edits/{edit}/listings/en-US"
         listing = self.call("GET", base)
         print(f"listing: {listing.get('title')} · "
