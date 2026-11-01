@@ -15,6 +15,8 @@ you can hand to a developer or an AI agent.
 
 <img src="docs/screenshots/01-apps.png" width="300" alt="Flutter apps detected on the device">
 
+**[Store screenshots](https://github.com/anasfik/FlutterGuard/tree/main/docs/play/screenshots) · [App icon](docs/play/icon-512.png) · [Feature graphic](docs/play/feature-1024x500.png) · [Play listing copy](docs/play/)**
+
 </div>
 
 ---
@@ -95,8 +97,12 @@ candidates. When it is absent the candidate list from `NOTICES.Z` and `package:`
 
 ## Install
 
-Download the signed APK from [Releases](https://github.com/anasfik/flutterguard/releases) and
-sideload it. Android 8.0+ (API 26). No Play Services required.
+- **Google Play** — [com.flutterguard.app](https://play.google.com/store/apps/details?id=com.flutterguard.app)
+- **GitHub** — the signed APK from
+  [Releases](https://github.com/anasfik/flutterguard/releases), sideloaded.
+
+Android 8.0+ (API 26). No Play Services required. Play serves builds signed with
+Google's key; switching a sideloaded install to the Play build needs one uninstall.
 
 The app declares only package-visibility permissions so it can see the other apps on the device.
 It has **no `INTERNET` permission** — every check is local, and nothing can leave the phone even
