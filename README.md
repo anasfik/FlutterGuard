@@ -1,21 +1,23 @@
 <div align="center">
 
+<img src="docs/play/icon-512.png" width="88" alt="FlutterGuard app icon">
+
 # FlutterGuard
 
 **On-device security audit for Flutter apps — no root, no PC, no network.**
 
-Point it at any Flutter app installed on your phone and get the artifact inventory, the
-manifest risk surface, the endpoints it talks to, the secrets it ships, and a graded report
-you can hand to a developer or an AI agent.
+Inspect an installed Flutter app or choose an APK file. Get an artifact inventory,
+manifest risks, embedded endpoints, potential secrets, and an evidence-backed A–F report.
+Static findings are leads to investigate, not proof of a vulnerability.
 
 [![Release](https://img.shields.io/github/v/release/anasfik/flutterguard?display_name=tag&sort=semver)](https://github.com/anasfik/flutterguard/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/android-8.0%2B-3ddc84.svg)](#install)
-[![No network](https://img.shields.io/badge/permissions-none%20beyond%20package%20visibility-success.svg)](#privacy)
+[![Offline](https://img.shields.io/badge/network-no%20INTERNET%20permission-success.svg)](#privacy)
 
-<img src="docs/screenshots/01-apps.png" width="300" alt="Flutter apps detected on the device">
+**[Download APK](https://github.com/anasfik/FlutterGuard/releases/latest) · [Google Play (when available)](https://play.google.com/store/apps/details?id=com.flutterguard.app) · [Privacy policy](https://gwhyyy.com/privacy/flutterguard)**
 
-**[Store screenshots](https://github.com/anasfik/FlutterGuard/tree/main/docs/play/screenshots) · [App icon](docs/play/icon-512.png) · [Feature graphic](docs/play/feature-1024x500.png) · [Play listing copy](docs/play/)**
+<img src="docs/play/feature-1024x500.png" width="800" alt="FlutterGuard — Inspect the app. Keep the evidence. Offline Flutter APK audits. No root. No account.">
 
 </div>
 
@@ -38,13 +40,17 @@ you what changed between two versions of the same app. That diff is where the re
 
 ## Screenshots
 
-| Inventory | Report grade + artifact | Explore |
+| App inventory | Report grade | Findings |
 |---|---|---|
-| <img src="docs/screenshots/01-apps.png" width="240"> | <img src="docs/screenshots/04-grade.png" width="240"> | <img src="docs/screenshots/05-explore.png" width="240"> |
+| <img src="docs/play/screenshots/fg-01-inventory.png" width="240" alt="Installed Flutter app inventory"> | <img src="docs/play/screenshots/fg-02-grade.png" width="240" alt="Evidence-backed app grade and report summary"> | <img src="docs/play/screenshots/fg-03-findings.png" width="240" alt="Findings list: exported service, cleartext traffic and user CA trust"> |
 
-| Findings (dark) |
-|---|
-| <img src="docs/screenshots/06-findings-dark.png" width="240"> |
+| Services and SDKs | Settings | Privacy |
+|---|---|---|
+| <img src="docs/play/screenshots/fg-04-services.png" width="240" alt="Detected third-party services and SDKs"> | <img src="docs/play/screenshots/fg-05-settings.png" width="240" alt="Settings: notifications, scan history, scan-all and re-scan controls"> | <img src="docs/play/screenshots/fg-06-privacy.png" width="240" alt="Readable in-app privacy policy"> |
+
+[Store assets and listing copy](docs/play/) · [App icon](docs/play/icon-512.png) · [Feature graphic](docs/play/feature-1024x500.png)
+
+Select an image to view the full-size store preview.
 
 ## What it finds
 
@@ -97,22 +103,30 @@ candidates. When it is absent the candidate list from `NOTICES.Z` and `package:`
 
 ## Install
 
-- **Google Play** — [com.flutterguard.app](https://play.google.com/store/apps/details?id=com.flutterguard.app)
-- **GitHub** — the signed APK from
-  [Releases](https://github.com/anasfik/flutterguard/releases), sideloaded.
+- **Google Play** — [FlutterGuard store listing](https://play.google.com/store/apps/details?id=com.flutterguard.app).
+  Availability depends on Google's review and rollout in your region. If the listing is not yet
+  available, use the GitHub APK below.
+- **GitHub** — download the signed `FlutterGuard-<version>.apk` from the
+  [latest release](https://github.com/anasfik/FlutterGuard/releases/latest) and allow installation
+  from your browser or file manager when Android prompts you.
 
 Android 8.0+ (API 26). No Play Services required. Play serves builds signed with
-Google's key; switching a sideloaded install to the Play build needs one uninstall.
+Google's key, which differs from the GitHub APK signer. Switching between them requires
+uninstalling the existing app. **Export reports you want to keep first:** uninstalling deletes
+the app's private reports, history and settings. Exports do not restore the in-app history.
 
-The app declares only package-visibility permissions so it can see the other apps on the device.
-It has **no `INTERNET` permission** — every check is local, and nothing can leave the phone even
-by accident.
+FlutterGuard has **no `INTERNET` permission**. Package visibility supports installed-app audits;
+foreground-service permissions support local scans, and notifications show scan progress.
+There are no accounts, ads or analytics. Sharing a report or opening an external link is an
+explicit action through another app.
 
 ## Use
 
-1. Open FlutterGuard — it lists the Flutter apps installed on the device (detection is done from
-   the APK contents, not from a manifest flag, so it also works on obfuscated and split APKs).
-   The inventory stays loaded while you move between screens; pull the refresh action to rescan it.
+1. Read the first-run disclosure and choose whether to enable installed-app inventory.
+   Agreeing lists detected Flutter apps from their APK contents, including obfuscated and split
+   APKs. Declining keeps **Scan an APK file** available; you can also share an APK to FlutterGuard.
+   Review or withdraw consent in **Settings**. The inventory stays loaded between screens;
+   use the refresh action to rediscover apps.
 2. Tap one. A staged progress stepper shows the real pipeline (artifact → manifest → DEX strings →
    native libraries → Dart kernel → assets). The scan runs in a foreground service, so leaving the
    screen does not cancel it; a terminal notification tells you when it finished.
@@ -141,6 +155,9 @@ asks for confirmation before stopping the run. A per-app timeout prevents one we
 stalling the queue.
 
 ### Headless (batch / CI)
+
+Open the app and agree to installed-app scanning before using the scripted entry point.
+Without consent, it refuses the scan rather than bypassing the disclosure.
 
 ```bash
 adb shell am start -n com.flutterguard.app/.MainActivity -e scan com.example.app
@@ -212,7 +229,8 @@ fall back to `.keystore/flutterguard.jks`. Debug builds use the debug key.
 ## Privacy
 
 Reports live in the app's private storage. Export uses a non-exported `FileProvider` on
-`cache/exports/`. The app cannot open a socket. Sensitive values are masked in the UI, in shared
+`cache/exports/`. The app has no network permission; exports and external links go through an
+app you choose. Sensitive values are masked in the UI, in shared
 exports, and on the clipboard (marked sensitive) unless you explicitly reveal or opt in, and
 screens that can show a revealed value set `FLAG_SECURE` while they are up. Treat any report you
 export with sensitive values as sensitive.
