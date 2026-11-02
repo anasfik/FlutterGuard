@@ -22,8 +22,8 @@ BRAND = HERE.parent / "brand"
 PAD = 88  # This Chromium build subtracts its window chrome from --window-size.
 
 TOKENS = """
-:root{--base:#0e1110;--surface:#181e1a;--ink:#f0f2ed;--muted:#b3bcb5;
---accent:#9ee6ad;--line:#303a33;--font:'Lato',sans-serif;
+:root{--base:#132d25;--surface:#1b3a2f;--ink:#f3f5ef;--muted:#b9c7bd;
+--accent:#bce6a0;--line:#2f4a3e;--font:'Lato',sans-serif;
 --mono:'DejaVu Sans Mono',monospace;--small:24px;--body:32px;--display:80px;
 --space:8px;--radius:32px;--shadow:none}
 """

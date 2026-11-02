@@ -1,0 +1,16 @@
+FlutterGuard 0.3.4 — the brand pass.
+
+Same offline auditor, now wearing the flutterguard.dev family: porcelain and
+forest surfaces, mint for the one thing that matters, flat ruled rows instead
+of stacked cards. The app bar carries the launcher mark and a GitHub action.
+
+- Light and dark schemes rebuilt from the site tokens, so the app and the
+  landing page read as one product.
+- Every card shell became a ruled row: inventory, report sections, findings,
+  queue, banners and legal pages.
+- Chips lost their outlines; selected state is the container plus a check.
+- The search action is a solid forest button, and the search field owns its
+  own surface instead of tinting the strip behind it.
+
+Nothing changed in what a scan does: no network permission, no accounts, no
+telemetry, reports stay on the device until you export or delete them.

@@ -21,8 +21,7 @@
     "raw": "raw-services.png", "slug": "04-services",
     "title": "Know what<br><em>ships inside.</em>",
     "sub": "Explore SDK and AI-provider markers recovered from an app's artifacts. Presence alone is not a vulnerability.",
-    "evidence": "SDK MARKERS / AI PROVIDERS",
-    "cropTop": 940, "phoneWidth": 880
+    "evidence": "SDK MARKERS / AI PROVIDERS"
   },
   {
     "raw": "raw-settings.png", "slug": "05-settings",

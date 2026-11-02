@@ -44,9 +44,9 @@ you what changed between two versions of the same app. That diff is where the re
 |---|---|---|
 | <img src="docs/play/screenshots/fg-01-inventory.png" width="240" alt="Installed Flutter app inventory"> | <img src="docs/play/screenshots/fg-02-grade.png" width="240" alt="Evidence-backed app grade and report summary"> | <img src="docs/play/screenshots/fg-03-findings.png" width="240" alt="Findings list: exported service, cleartext traffic and user CA trust"> |
 
-| Services and SDKs | Settings | Privacy |
+| Endpoints and routes | Settings | Privacy |
 |---|---|---|
-| <img src="docs/play/screenshots/fg-04-services.png" width="240" alt="Detected third-party services and SDKs"> | <img src="docs/play/screenshots/fg-05-settings.png" width="240" alt="Settings: notifications, scan history, scan-all and re-scan controls"> | <img src="docs/play/screenshots/fg-06-privacy.png" width="240" alt="Readable in-app privacy policy"> |
+| <img src="docs/play/screenshots/fg-04-services.png" width="240" alt="Candidate endpoints and route prefixes recovered from strings"> | <img src="docs/play/screenshots/fg-05-settings.png" width="240" alt="Settings: notifications, scan history, scan-all and re-scan controls"> | <img src="docs/play/screenshots/fg-06-privacy.png" width="240" alt="Readable in-app privacy policy"> |
 
 [Store assets and listing copy](docs/play/) · [App icon](docs/play/icon-512.png) · [Feature graphic](docs/play/feature-1024x500.png)
 
