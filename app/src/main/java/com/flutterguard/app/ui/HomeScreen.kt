@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -33,8 +34,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +44,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -58,20 +58,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.flutterguard.app.R
 import com.flutterguard.app.scan.InstalledApp
 import com.flutterguard.app.scan.InventoryState
 import com.flutterguard.app.scan.ScanPhase
@@ -115,6 +118,7 @@ internal fun HomeScreen(
 ) {
     var confirmScanAll by remember { mutableStateOf(false) }
     val query = search.query
+    val context = LocalContext.current
     Scaffold(
         topBar = {
             Column {
@@ -122,13 +126,39 @@ internal fun HomeScreen(
                     // Title only: one line, so the bar stays the compact single-row
                     // variant. No subtitle anywhere else stands in for it.
                     title = {
-                        Text(
-                            "FlutterGuard",
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.semantics { heading() },
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Real launcher mark on its own charcoal plate, so the
+                            // ivory F stays legible in both themes.
+                            Box(
+                                Modifier
+                                    .size(24.dp)
+                                    .background(Color(0xFF0E1110), RoundedCornerShape(6.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Image(
+                                    painterResource(R.drawable.ic_brand_mark),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(Space.s))
+                            Text(
+                                "FlutterGuard",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.semantics { heading() },
+                            )
+                        }
                     },
                     actions = {
+                        IconButton(
+                            onClick = { openWebLink(context, "https://github.com/anasfik/FlutterGuard") },
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_github),
+                                contentDescription = "FlutterGuard on GitHub",
+                            )
+                        }
                         IconButton(onClick = onOpenSettings, modifier = Modifier.size(48.dp)) {
                             Icon(Icons.Default.Settings, contentDescription = "Settings")
                         }
@@ -407,8 +437,8 @@ private fun HomeSearchBar(
             BadgedBox(badge = { if (search.filtering) Badge() }) {
                 FloatingActionButton(
                     onClick = { onSearch(search.expand()) },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.graphicsLayer {
                         val p = progress.value
                         alpha = 1f - p
@@ -447,6 +477,15 @@ private fun HomeSearchBar(
                     modifier = Modifier.weight(1f).focusRequester(focusRequester),
                     singleLine = true,
                     shape = MaterialTheme.shapes.extraLarge,
+                    // Explicit field surface: the strip behind it stays the list,
+                    // never a wide translucent overlay.
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                    ),
                     placeholder = { Text("Search name or package") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = {
@@ -460,9 +499,7 @@ private fun HomeSearchBar(
                 Spacer(Modifier.width(8.dp))
                 IconButton(
                     onClick = { onSearch(search.collapse()) },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.shapes.extraSmall),
+                    modifier = Modifier.size(48.dp),
                 ) {
                     Icon(Icons.Default.Close, contentDescription = "Close search")
                 }
@@ -473,8 +510,7 @@ private fun HomeSearchBar(
 
 @Composable
 private fun ActiveScanCard(phase: ScanPhase.Running, onReopen: () -> Unit, onCancel: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    Column(Modifier.fillMaxWidth().padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text("Scan in progress", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Text(phase.job.packageName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
             LinearProgressIndicator(progress = { phase.pct / 100f }, modifier = Modifier.fillMaxWidth())
@@ -495,7 +531,6 @@ private fun ActiveScanCard(phase: ScanPhase.Running, onReopen: () -> Unit, onCan
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
 }
 
 /**
@@ -505,17 +540,13 @@ private fun ActiveScanCard(phase: ScanPhase.Running, onReopen: () -> Unit, onCan
  */
 @Composable
 private fun QueueEntryRow(queue: ScanQueueState, onClick: () -> Unit) {
-    val shape = MaterialTheme.shapes.medium
-    Surface(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
             .clickable(onClickLabel = "Open scan queue", onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = shape,
     ) {
         Row(
-            Modifier.padding(horizontal = Space.l, vertical = Space.s).defaultMinSize(minHeight = 48.dp),
+            Modifier.padding(horizontal = Space.s, vertical = Space.s).defaultMinSize(minHeight = 48.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -544,18 +575,19 @@ private fun QueueEntryRow(queue: ScanQueueState, onClick: () -> Unit) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
 @Composable
 private fun AppRow(app: InstalledApp, onClick: () -> Unit) {
-    Surface(
+    // Ruled row, not a card: the list carries one hairline per row, like the
+    // site's capability rows. Structure inside the row is unchanged.
+    Column(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = MaterialTheme.shapes.medium,
     ) {
         Row(
-            Modifier.padding(horizontal = Space.l, vertical = Space.s).defaultMinSize(minHeight = 72.dp),
+            Modifier.padding(horizontal = Space.s, vertical = Space.s).defaultMinSize(minHeight = 72.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             app.icon?.let {
@@ -598,6 +630,7 @@ private fun AppRow(app: InstalledApp, onClick: () -> Unit) {
             }
             Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -622,9 +655,30 @@ private fun LoadingRow(label: String) {
 
 @Composable
 private fun SkeletonRow() {
-    Surface(
-        modifier = Modifier.fillMaxWidth().height(64.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = MaterialTheme.shapes.medium,
-    ) {}
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.height(64.dp).padding(horizontal = Space.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = MaterialTheme.shapes.extraSmall,
+                modifier = Modifier.size(40.dp),
+            ) {}
+            Spacer(Modifier.width(Space.m))
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = MaterialTheme.shapes.extraSmall,
+                    modifier = Modifier.size(140.dp, 12.dp),
+                ) {}
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = MaterialTheme.shapes.extraSmall,
+                    modifier = Modifier.size(96.dp, 10.dp),
+                ) {}
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
 }

@@ -12,7 +12,6 @@ import android.os.PersistableBundle
 import android.view.Window
 import android.view.WindowManager
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,8 +34,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -160,10 +158,6 @@ fun WorkbenchChip(selected: Boolean, onClick: () -> Unit, label: String) {
             shape = MaterialTheme.shapes.extraLarge,
             color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
             contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-            border = BorderStroke(
-                1.dp,
-                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-            ),
             modifier = Modifier.heightIn(min = ChipMetrics.PILL_DP.dp),
         ) {
             Row(
@@ -210,18 +204,18 @@ fun ChipRow(modifier: Modifier = Modifier, content: @Composable RowScope.() -> U
  * four emphasis steps; ordering is carried by the list sort and the severity
  * word, never by hue alone.
  */
-data class SeverityStyle(val dot: Color, val container: Color, val content: Color, val stroke: Color?)
+data class SeverityStyle(val dot: Color, val container: Color, val content: Color)
 
 @Composable
 fun severityStyle(severity: Severity): SeverityStyle {
     val scheme = MaterialTheme.colorScheme
     return when (severity) {
-        Severity.CRITICAL -> SeverityStyle(scheme.error, scheme.errorContainer, scheme.onErrorContainer, null)
-        // Outlined: the same red family one emphasis step down from CRITICAL.
-        Severity.HIGH -> SeverityStyle(scheme.error, scheme.surfaceContainerHigh, scheme.error, scheme.error)
-        Severity.MEDIUM -> SeverityStyle(scheme.onSurfaceVariant, scheme.surfaceContainerHigh, scheme.onSurface, null)
+        Severity.CRITICAL -> SeverityStyle(scheme.error, scheme.errorContainer, scheme.onErrorContainer)
+        // Same red family one emphasis step down from CRITICAL, without a border.
+        Severity.HIGH -> SeverityStyle(scheme.error, scheme.surfaceContainerHigh, scheme.error)
+        Severity.MEDIUM -> SeverityStyle(scheme.onSurfaceVariant, scheme.surfaceContainerHigh, scheme.onSurface)
         Severity.LOW, Severity.INFO ->
-            SeverityStyle(scheme.outline, scheme.surfaceContainerHigh, scheme.onSurfaceVariant, null)
+            SeverityStyle(scheme.outline, scheme.surfaceContainerHigh, scheme.onSurfaceVariant)
     }
 }
 
@@ -232,14 +226,11 @@ fun SeverityDot(severity: Severity, size: Int = 8) {
 
 @Composable
 fun Banner(title: String, detail: String, error: Boolean = false) {
-    Card(
+    Column(
         Modifier.fillMaxWidth().padding(horizontal = Gutter, vertical = Space.xs),
-        colors = CardDefaults.cardColors(
-            containerColor = if (error) MaterialTheme.colorScheme.errorContainer
-            else MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
     ) {
-        Row(Modifier.padding(Space.l), verticalAlignment = Alignment.Top) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(Modifier.padding(vertical = Space.m), verticalAlignment = Alignment.Top) {
             Icon(
                 if (error) Icons.Default.Warning else Icons.Default.Info,
                 contentDescription = null,
@@ -265,8 +256,9 @@ fun Banner(title: String, detail: String, error: Boolean = false) {
 
 @Composable
 fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-        Column(Modifier.padding(Space.l)) {
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Column(Modifier.padding(vertical = Space.l)) {
             Text(
                 title,
                 style = MaterialTheme.typography.titleSmall,

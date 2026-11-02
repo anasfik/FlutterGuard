@@ -1,6 +1,5 @@
 package com.flutterguard.app.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -34,8 +33,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -558,11 +555,7 @@ internal fun rememberScanLog(
 @Composable
 private fun GradeCard(report: Report) {
     val grade = report.grade
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-    ) {
-        Column(Modifier.padding(Space.l)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = Space.l)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Neutral, not the accent: an F is the worst outcome on this
                 // screen and must never be the most affirmative colour on it.
@@ -596,7 +589,6 @@ private fun GradeCard(report: Report) {
                 }
             }
         }
-    }
 }
 
 /** Version as the package manager reported it, or the one "unknown" placeholder. */
@@ -675,11 +667,11 @@ private fun FindingsSection(report: Report, listState: LazyListState) {
 private fun FindingCard(finding: Finding, packageName: String, secrets: List<String>) {
     var expanded by remember(packageName, finding.id) { mutableStateOf(false) }
     var revealed by remember(packageName, finding.id) { mutableStateOf(setOf<Int>()) }
-    Card(
+    Column(
         Modifier.fillMaxWidth().clickable { expanded = !expanded },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        Column(Modifier.padding(Space.l)) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Column(Modifier.padding(vertical = Space.l)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SeverityDot(finding.severity)
                 Spacer(Modifier.width(Space.s))
@@ -697,7 +689,6 @@ private fun FindingCard(finding: Finding, packageName: String, secrets: List<Str
                     color = style.container,
                     contentColor = style.content,
                     shape = MaterialTheme.shapes.extraSmall,
-                    border = style.stroke?.let { BorderStroke(1.dp, it) },
                 ) {
                     Text(
                         finding.severity.name,
@@ -741,9 +732,9 @@ private fun FindingCard(finding: Finding, packageName: String, secrets: List<Str
                         modifier = Modifier.padding(top = Space.xs),
                     )
                 }
-            }
         }
-    }
+        }
+}
 }
 
 @Composable

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Brand glyph from the launcher foreground, cropped to its own bounds so it
+     reads at 20-24 dp next to the app bar title. Not tinted: the ivory F and
+     mint square must survive. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <group android:scaleX="0.7" android:scaleY="0.7"
+        android:translateX="-11.9" android:translateY="-10.5">
+        <path android:fillColor="#f0f2ed"
+            android:pathData="M17,15h30v8H25v7h18v8H25v11h-8V15Z" />
+        <path android:fillColor="#9ee6ad" android:pathData="M36,38h11v11H36z" />
+    </group>
+</vector>

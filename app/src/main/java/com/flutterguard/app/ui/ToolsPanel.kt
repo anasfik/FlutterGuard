@@ -19,10 +19,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
@@ -80,12 +79,9 @@ internal fun ToolsPanel(
         }
     }
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Column(Modifier.padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Column(Modifier.padding(vertical = Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Text(
                 "Tools",
                 style = MaterialTheme.typography.titleSmall,
@@ -229,17 +225,13 @@ private fun PackageScanRow(
 /** A list row, not a primary button: title + reason + chevron, dimmed when blocked. */
 @Composable
 private fun ScanAllRow(enabled: Boolean, subtitle: String, title: String, onClick: () -> Unit) {
-    val shape = MaterialTheme.shapes.medium
-    Surface(
-        // No cyan fill behind it: the row is a row.
+    Column(
+        // No card shape behind it: the row is a row.
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
             // clickable(enabled = false) keeps the "disabled" semantics and blocks
             // the tap, so a blocked row cannot silently do nothing.
             .clickable(enabled = enabled, onClickLabel = title, onClick = onClick),
-        color = MaterialTheme.colorScheme.surface,
-        shape = shape,
     ) {
         Row(
             Modifier.padding(horizontal = Space.l, vertical = Space.s).defaultMinSize(minHeight = 48.dp),
@@ -274,5 +266,6 @@ private fun ScanAllRow(enabled: Boolean, subtitle: String, title: String, onClic
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f),
             )
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
