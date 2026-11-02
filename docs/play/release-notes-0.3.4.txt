@@ -14,3 +14,9 @@ of stacked cards. The app bar carries the launcher mark and a GitHub action.
 
 Nothing changed in what a scan does: no network permission, no accounts, no
 telemetry, reports stay on the device until you export or delete them.
+
+Upgrading from the previous GitHub APK: this build uses a new signing key, so
+Android will refuse to install it over 0.3.3. Export any reports you want to
+keep, uninstall FlutterGuard, then install this APK. Uninstalling removes the
+in-app reports, history and settings, and exports do not restore the history.
+Play installs are re-signed by Google and are not affected by this change.
