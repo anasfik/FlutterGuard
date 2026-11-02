@@ -131,14 +131,14 @@ internal fun HomeScreen(
                             // ivory F stays legible in both themes.
                             Box(
                                 Modifier
-                                    .size(24.dp)
-                                    .background(Color(0xFF0E1110), RoundedCornerShape(6.dp)),
+                                    .size(28.dp)
+                                    .background(Color(0xFF0E1110), RoundedCornerShape(8.dp)),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Image(
                                     painterResource(R.drawable.ic_brand_mark),
                                     contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(24.dp),
                                 )
                             }
                             Spacer(Modifier.width(Space.s))
