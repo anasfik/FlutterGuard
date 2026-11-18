@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "FlutterGuard"
 include(":app")
 include(":engine")
+include(":cli")
