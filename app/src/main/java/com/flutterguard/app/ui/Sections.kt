@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.flutterguard.app.scan.AndroidScan
 import com.flutterguard.app.scan.ApkSource
 import com.flutterguard.app.scan.ArtifactEntry
 import com.flutterguard.app.scan.HostInfo
@@ -95,7 +96,7 @@ internal fun rememberArtifactSource(packageName: String, enabled: Boolean = true
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 val info = context.packageManager.getApplicationInfo(packageName, 0)
-                val source = ApkSource.forApplication(info)
+                val source = AndroidScan.source(info)
                 source to source.artifactEntries()
             }
         }

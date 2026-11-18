@@ -15,10 +15,18 @@ import org.json.JSONObject
  */
 object ReportJson {
 
-    const val SCHEMA = "flutterguard/report/1"
+    const val SCHEMA = "flutterguard/report/2"
 
-    /** Only the exact schema this build writes may be decoded. */
-    fun acceptsSchema(value: String?): Boolean = value == SCHEMA
+    /** The only other schema this build still reads: it stored no kinds. */
+    const val LEGACY_SCHEMA = "flutterguard/report/1"
+
+    private val acceptedSchemas = setOf(LEGACY_SCHEMA, SCHEMA)
+
+    /**
+     * Only the exact schemas this build writes or migrated from may be decoded.
+     * A malformed, missing or future schema is refused, never defaulted.
+     */
+    fun acceptsSchema(value: String?): Boolean = value in acceptedSchemas
 
     fun decode(text: String): Report? {
         val root = runCatching { JSONObject(text) }.getOrNull() ?: return null
@@ -71,6 +79,10 @@ object ReportJson {
             snapshotBytes = frameworkJson?.longOrNull("snapshotBytes"),
             engineDebug = frameworkJson?.bool("engineDebug") ?: false,
             libappMissing = frameworkJson?.bool("libappMissing") ?: false,
+            // Optional in the schema: absent means unknown, never a default claim.
+            snapshotKind = frameworkJson?.str("snapshotKind"),
+            snapshotHash = frameworkJson?.str("snapshotHash"),
+            snapshotFeatures = frameworkJson?.array("snapshotFeatures").strings().orEmpty(),
         )
 
         val signing = SigningInfo(
@@ -98,10 +110,12 @@ object ReportJson {
         )
 
         val findings = root.array("findings").objects().map { f ->
+            val id = f.str("id") ?: ""
+            val severity = runCatching { Severity.valueOf(f.str("severity") ?: "") }.getOrDefault(Severity.INFO)
             Finding(
-                id = f.str("id") ?: "",
+                id = id,
                 title = f.str("title") ?: "",
-                severity = runCatching { Severity.valueOf(f.str("severity") ?: "") }.getOrDefault(Severity.INFO),
+                severity = severity,
                 detail = f.str("detail") ?: "",
                 evidence = f.array("evidence").objects().map { e ->
                     Evidence(
@@ -113,6 +127,11 @@ object ReportJson {
                 },
                 remediation = f.str("remediation") ?: "",
                 masvs = f.array("masvs").strings(),
+                // Re-derive from the catalog; a serialized kind may only lower
+                // confidence, so a tampered file cannot promote an unknown ID.
+                kind = FindingKind.parse(f.str("kind"))
+                    ?.let { FindingKind.lessCertain(FindingCatalog.kindOf(id, severity), it) }
+                    ?: FindingCatalog.kindOf(id, severity),
             )
         }
 
@@ -154,8 +173,15 @@ object ReportJson {
                     autoVerify = d.bool("autoVerify"),
                 )
             },
-            stats = stats,
-            grade = root.str("grade")?.firstOrNull() ?: '?',
+            // Kind counts are recomputed from the decoded findings (schema 1
+            // carried none); severity totals stay the stored totals.
+            stats = stats.copy(
+                confirmed = findings.count { it.kind == FindingKind.CONFIRMED },
+                suspected = findings.count { it.kind == FindingKind.SUSPECTED },
+                informational = findings.count { it.kind == FindingKind.INFORMATIONAL },
+            ),
+            // Never trust the stored letter: it was computed from leads too.
+            grade = gradeOf(findings),
             routes = root.array("routes").strings(),
             dartSources = root.array("dartSources").strings(),
             artifacts = root.array("artifacts").objects().map { a ->

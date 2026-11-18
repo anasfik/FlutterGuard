@@ -82,6 +82,13 @@ data class Finding(
     val evidence: List<Evidence>,
     val remediation: String,
     val masvs: List<String> = emptyList(),
+    /**
+     * What the artifact proves (`CONFIRMED`), what is only a lead
+     * (`SUSPECTED`), or inventory (`INFORMATIONAL`). Derived centrally from
+     * [id] and [severity] so no rule has to pass it and an unknown ID can never
+     * default to a confirmed fact.
+     */
+    val kind: FindingKind = FindingCatalog.kindOf(id, severity),
 )
 
 data class AppMeta(
@@ -126,6 +133,16 @@ data class FrameworkInfo(
     val engineDebug: Boolean = false,
     /** Flutter assets exist but no libapp.so: the Dart code is not AOT-compiled. */
     val libappMissing: Boolean = false,
+    /**
+     * Observed Dart snapshot header kind label (only `"full-AOT"` is surfaced;
+     * any other kind or an unreadable header stays null). Not obfuscation and
+     * not a build-mode verdict.
+     */
+    val snapshotKind: String? = null,
+    /** Opaque 32-char snapshot serialization hash; not an engine version. */
+    val snapshotHash: String? = null,
+    /** VM build configuration tokens from the header, split on spaces. */
+    val snapshotFeatures: List<String> = emptyList(),
 )
 
 data class SigningInfo(
@@ -158,6 +175,11 @@ data class ThirdPartyHit(val service: String, val evidence: List<String>)
 data class ReportStats(
     val critical: Int, val high: Int, val medium: Int, val low: Int, val info: Int,
     val stringsScanned: Long, val durationMs: Long,
+    /**
+     * Kind counts, independent of the severity totals above (which stay totals
+     * over every finding). A lead is counted here, never in the grade.
+     */
+    val confirmed: Int = 0, val suspected: Int = 0, val informational: Int = 0,
 )
 
 data class Report(
@@ -247,6 +269,46 @@ data class PermissionHit(val name: String, val protection: String, val descripti
 
 data class DeepLink(val component: String, val scheme: String, val host: String?, val autoVerify: Boolean)
 
+/**
+ * Identity of the artifact under analysis. [versionName], [versionCode],
+ * [minSdk] and [targetSdk] come from the package manager for an installed app
+ * and from the manifest for a picked file; [InstallFacts] overrides the
+ * installed values when they are known.
+ */
+data class ScanTarget(
+    val packageName: String,
+    val label: String,
+    val versionName: String?,
+    val versionCode: Long,
+    val minSdk: Int?,
+    val targetSdk: Int?,
+    val isSystem: Boolean,
+)
+
+/**
+ * Signing facts extracted by the platform layer. Certificate bytes are the
+ * current signers for a multi-signed APK, otherwise the signing certificate
+ * history; the engine performs the X.509 parsing and scheme detection.
+ */
+data class SigningFacts(
+    val certBytes: List<ByteArray>,
+    val multipleSigners: Boolean,
+    val rotationHistory: Boolean,
+)
+
+/** Installed-app facts that do not exist for a file scan. */
+data class InstallFacts(
+    val versionName: String?,
+    val versionCode: Long,
+    val minSdk: Int?,
+    val targetSdk: Int?,
+    val installer: String?,
+    val firstInstallMs: Long,
+    val lastUpdateMs: Long,
+    val signing: SigningFacts?,
+)
+
+
 fun gradeOf(c: Int, h: Int, m: Int, l: Int): Char {
     if (c > 0) return 'F'
     val score = h * 25 + m * 8 + l * 2
@@ -257,4 +319,20 @@ fun gradeOf(c: Int, h: Int, m: Int, l: Int): Char {
         score <= 110 -> 'D'
         else -> 'F'
     }
+}
+
+/**
+ * Grade of a report, counting only [FindingKind.CONFIRMED] findings. Leads and
+ * inventory stay visible and counted in [ReportStats], but a string pattern is
+ * not evidence of a defect and must not lower the letter. A grade is never a
+ * security guarantee.
+ */
+fun gradeOf(findings: List<Finding>): Char {
+    val confirmed = findings.filter { it.kind == FindingKind.CONFIRMED }
+    return gradeOf(
+        c = confirmed.count { it.severity == Severity.CRITICAL },
+        h = confirmed.count { it.severity == Severity.HIGH },
+        m = confirmed.count { it.severity == Severity.MEDIUM },
+        l = confirmed.count { it.severity == Severity.LOW },
+    )
 }

@@ -1,7 +1,5 @@
 package com.flutterguard.app.scan.rules
 
-import android.content.Context
-import android.content.pm.PackageManager
 import com.flutterguard.app.scan.parsers.AxmlNode
 import com.flutterguard.app.scan.DeepLink
 import com.flutterguard.app.scan.Evidence
@@ -35,9 +33,9 @@ object ManifestRules {
     private val oauthishSchemes = listOf("oauth", "login", "auth", "callback", "token", " redirect")
 
     fun evaluate(
-        context: Context,
         manifest: AxmlNode,
         targetSdk: Int?,
+        permissionProtection: (String) -> String = { "custom/unknown" },
     ): Pair<List<Finding>, ManifestFacts> {
         val findings = ArrayList<Finding>()
         val facts = ManifestFacts()
@@ -96,26 +94,10 @@ object ManifestRules {
         )
 
         // --- permissions (manifest level) ---
-        val pm = context.packageManager
         for (node in manifest.children("uses-permission").plus(manifest.children("permission"))) {
             val name = node.attr("name") ?: continue
             if (node.name == "uses-permission") facts.requestedPermissions.add(name)
-            val protection = try {
-                val pi = pm.getPermissionInfo(name, 0)
-                // Read the field, not `getProtection()`. The getter only exists from
-                // API 28 and minSdk is 26, so on Android 8.0/8.1 it throws
-                // NoSuchMethodError — an Error, which the catch below does not cover.
-                @Suppress("DEPRECATION")
-                val level = pi.protectionLevel
-                when (level and 0xF) {
-                    2 -> if (level and 0x10 != 0) "signature|privileged" else "signature"
-                    3 -> "dangerous"
-                    4 -> "normal"
-                    else -> "protection=0x${level.toString(16)}"
-                }
-            } catch (_: Exception) {
-                "custom/unknown"
-            }
+            val protection = permissionProtection(name)
             facts.permissionHits.add(
                 PermissionHit(name, protection, riskyPermissions[name] ?: "")
             )

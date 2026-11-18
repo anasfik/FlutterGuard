@@ -3,6 +3,8 @@ package com.flutterguard.app.scan.rules
 import com.flutterguard.app.scan.Finding
 import com.flutterguard.app.scan.FrameworkInfo
 import com.flutterguard.app.scan.Severity
+import com.flutterguard.app.scan.SnapshotKind
+import com.flutterguard.app.scan.SnapshotMetadata
 
 /** Flutter evidence: engine, build mode, obfuscation, other-framework detection. */
 object FlutterRules {
@@ -22,6 +24,7 @@ object FlutterRules {
         kernelBlobBytes: Long?,
         snapshotBytes: Long?,
         kernelFiles: List<String>,
+        snapshot: SnapshotMetadata? = null,
     ): Pair<FrameworkInfo, List<Finding>> {
         val findings = ArrayList<Finding>()
         val hasFlutterAssets = zipNames.any { it.startsWith("assets/flutter_assets/") }
@@ -60,12 +63,12 @@ object FlutterRules {
             )
         }
 
-        if (!debugJit && (snapshotBytes ?: 0L) > 0) findings += Finding(
+        if (!debugJit && !hasLibapp && (snapshotBytes ?: 0L) > 0) findings += Finding(
             id = "FLUT-JIT-SNAPSHOT",
             title = "JIT snapshot data bundled without AOT library",
             severity = Severity.MEDIUM,
-            detail = "isolate_snapshot_data/vm_snapshot_data are present (${(snapshotBytes ?: 0L) / 1024 / 1024} MB) but no libapp.so was found. " +
-                "This is a profile/JIT-style artifact; the Dart isolate can be reproduced with `flutter attach` on desktop.",
+            detail = "isolate_snapshot_data/vm_snapshot_data are present (${(snapshotBytes ?: 0L) / 1024 / 1024} MB) and no libapp.so was found in the artifact. " +
+                "This is a profile/JIT-style artifact rather than a release AOT build.",
             evidence = emptyList(),
             remediation = "Ship release AOT builds only.",
             masvs = listOf("MASVS-RESILIENCE-1"),
@@ -104,12 +107,15 @@ object FlutterRules {
         )
 
         val obfuscated = if (isFlutter && hasLibapp) packageUriCount < 3 || camelCount < 20 else null
+        val aot = snapshot?.takeIf { it.kind == SnapshotKind.FULL_AOT }
         if (obfuscated == false) findings += Finding(
             id = "FLUT-NO-OBFUSCATION",
-            title = "Dart symbols not obfuscated",
+            title = "Dart symbol names present in libapp.so",
             severity = Severity.LOW,
-            detail = "libapp.so contains $packageUriCount package: URIs and $camelCount CamelCase identifiers — class/library " +
-                "structure can be recovered with tools like Blutter.",
+            detail = "libapp.so still exposes $packageUriCount package: URIs and $camelCount CamelCase identifiers in its " +
+                "string table. That count is a heuristic about how much symbol structure a host-side tool could recover; " +
+                "it does not prove this build is unobfuscated, and obfuscation is not an integrity control. Confirm structure " +
+                "with a host-side object-graph run (Blutter/aotopsy).",
             evidence = emptyList(),
             remediation = "Build with --obfuscate --split-debug-info and keep the symbols file private.",
             masvs = listOf("MASVS-RESILIENCE-2"),
@@ -131,14 +137,20 @@ object FlutterRules {
             snapshotBytes = snapshotBytes,
             engineDebug = engineDebug,
             libappMissing = !hasLibapp,
+            // Only full-AOT is AOT evidence. Any other kind or a null read stays
+            // unknown rather than being labelled debug, JIT or obfuscated.
+            snapshotKind = aot?.kind?.label,
+            snapshotHash = aot?.serializationHash,
+            snapshotFeatures = aot?.features ?: emptyList(),
         )
         if (hasLibapp && libappSha256 != null) findings += Finding(
             id = "FLUT-FINGERPRINT",
             title = "libapp.so fingerprint",
             severity = Severity.INFO,
-            detail = "SHA-256 of the Dart AOT snapshot: $libappSha256. Match this against reFlutter's enginehash.csv / Blutter for desktop follow-up.",
+            detail = "SHA-256 of libapp.so: $libappSha256. This identifies the inspected application library artifact, " +
+                "not the Flutter engine or its Dart version; compare it across builds to tell artifacts apart.",
             evidence = emptyList(),
-            remediation = "Use the hash to identify the exact engine build when doing desktop analysis.",
+            remediation = "Compare this hash across builds to detect a changed artifact; it does not identify the engine.",
         )
         return info to findings
     }

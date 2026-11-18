@@ -10,7 +10,7 @@ enum class ReportSection {
 }
 
 /**
- * Report serialization: canonical JSON (schema flutterguard/report/1) + Markdown.
+ * Report serialization: canonical JSON (schema `flutterguard/report/2`) + Markdown.
  *
  * Defaults are safe: raw secret values never appear (details, URL samples,
  * host names, channels, third-party evidence, permissions, deep links, routes
@@ -42,11 +42,10 @@ object ReportExport {
     }
 
     /**
-     * The exact tree [toJson] serializes. Exposed for regressions because
-     * `org.json` is Android-stubbed in JVM tests; the serializer consumes this
-     * same map, so section gating and redaction are tested for real here.
+     * The exact tree [toJson] serializes. Public so app-side regressions can
+     * assert the tree without depending on Android's stubbed org.json.
      */
-    internal fun payload(
+    fun payload(
         r: Report,
         sections: Set<ReportSection> = allSections,
         sensitive: Boolean = false,
@@ -54,7 +53,7 @@ object ReportExport {
         val secrets = if (sensitive) emptyList() else r.secretValues()
         val safe = if (secrets.isEmpty()) r else r.scrubSecrets(secrets)
         val root = LinkedHashMap<String, Any?>()
-        root["schema"] = "flutterguard/report/1"
+        root["schema"] = ReportJson.SCHEMA
         root["generatedAt"] = safe.generatedAt
 
         // The framework object is emitted for either section: an export that
@@ -72,6 +71,12 @@ object ReportExport {
                 fw["snapshotBytes"] = safe.framework.snapshotBytes
                 fw["engineDebug"] = safe.framework.engineDebug
                 fw["libappMissing"] = safe.framework.libappMissing
+                // Emitted only when observed: an absent key decodes as unknown.
+                safe.framework.snapshotKind?.let { fw["snapshotKind"] = it }
+                safe.framework.snapshotHash?.let { fw["snapshotHash"] = it }
+                if (safe.framework.snapshotFeatures.isNotEmpty()) {
+                    fw["snapshotFeatures"] = safe.framework.snapshotFeatures
+                }
             }
             if (ReportSection.DEPENDENCIES in sections) fw["dartDeps"] = safe.framework.dartDeps
             root["framework"] = fw
@@ -112,6 +117,9 @@ object ReportExport {
                 "critical" to safe.stats.critical, "high" to safe.stats.high, "medium" to safe.stats.medium,
                 "low" to safe.stats.low, "info" to safe.stats.info,
                 "stringsScanned" to safe.stats.stringsScanned, "durationMs" to safe.stats.durationMs,
+                "confirmed" to safe.findings.count { it.kind == FindingKind.CONFIRMED },
+                "suspected" to safe.findings.count { it.kind == FindingKind.SUSPECTED },
+                "informational" to safe.findings.count { it.kind == FindingKind.INFORMATIONAL },
             )
             root["grade"] = safe.grade.toString()
         }
@@ -120,6 +128,7 @@ object ReportExport {
             root["findings"] = safe.findings.map { f ->
                 linkedMapOf(
                     "id" to f.id, "title" to f.title, "severity" to f.severity.name,
+                    "kind" to f.kind.name,
                     "detail" to f.detail,
                     "evidence" to f.evidence.map { e ->
                         val m = LinkedHashMap<String, Any?>()
@@ -193,6 +202,10 @@ object ReportExport {
     ): String {
         val secrets = if (sensitive) emptyList() else r.secretValues()
         val safe = if (secrets.isEmpty()) r else r.scrubSecrets(secrets)
+        // Derived from the findings so the counts can never disagree with them.
+        val confirmed = safe.findings.count { it.kind == FindingKind.CONFIRMED }
+        val suspected = safe.findings.count { it.kind == FindingKind.SUSPECTED }
+        val informational = safe.findings.count { it.kind == FindingKind.INFORMATIONAL }
         return buildString {
             appendLine("# FlutterGuard report — ${safe.meta.label} (`${safe.meta.packageName}`)")
             appendLine()
@@ -211,6 +224,7 @@ object ReportExport {
                 appendLine("- Framework: ${if (safe.framework.isFlutter) "Flutter ${safe.framework.dartVersion ?: ""} (${safe.framework.buildMode ?: "?"}, obfuscated=${safe.framework.obfuscated})" else safe.framework.otherFrameworks.joinToString().ifEmpty { "native" }}")
                 appendLine("- Signing: ${safe.signing.schemes.joinToString("/").ifEmpty { "?" }}${if (safe.signing.debugCert) " · DEBUG CERT" else ""} · SHA-256 ${safe.signing.sha256Fingerprint?.take(16)}…")
                 appendLine("- Grade: **${safe.grade}** — ${safe.stats.critical} critical, ${safe.stats.high} high, ${safe.stats.medium} medium, ${safe.stats.low} low, ${safe.stats.info} info (${safe.stats.stringsScanned} strings scanned in ${safe.stats.durationMs / 1000}s)")
+                appendLine("- Confidence: $confirmed confirmed, $suspected suspected, $informational informational — the grade counts confirmed artifact facts only; leads are never scored and nothing here proves exploitability")
                 appendLine()
             }
 
@@ -218,7 +232,7 @@ object ReportExport {
                 appendLine("## Findings")
                 for (f in safe.findings) {
                     appendLine()
-                    appendLine("### [${f.severity}] ${f.title}  `${f.id}`")
+                    appendLine("### [${f.severity}] ${f.title}  `${f.id}` · ${f.kind}")
                     appendLine(f.detail)
                     for (e in f.evidence.take(3)) {
                         appendLine("> `${e.source}@${e.offset}`: `${e.snippet}`")
@@ -310,13 +324,13 @@ object ReportExport {
     }
 
     fun writeFile(
-        context: android.content.Context,
+        cacheDir: File,
         r: Report,
         ext: String,
         sections: Set<ReportSection> = allSections,
         sensitive: Boolean = false,
     ): File {
-        val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val dir = File(cacheDir, "exports").apply { mkdirs() }
         val prefix = "${r.meta.packageName.replace('.', '_')}_report_"
         val f = File.createTempFile(prefix, ".$ext", dir)
         f.writeText(render(r, ext, sections, sensitive))

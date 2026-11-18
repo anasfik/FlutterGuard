@@ -1,8 +1,7 @@
 package com.flutterguard.app.scan.rules
 
-import android.content.pm.PackageInfo
-import android.os.Build
 import com.flutterguard.app.scan.Finding
+import com.flutterguard.app.scan.SigningFacts
 import com.flutterguard.app.scan.SigningInfo
 import com.flutterguard.app.scan.Severity
 import java.io.ByteArrayInputStream
@@ -14,23 +13,17 @@ import java.security.cert.X509Certificate
 /** Signing analysis: certificate identity + APK signature scheme presence. */
 object SigningRules {
 
-    fun evaluate(pi: PackageInfo, baseApkPath: String, zipNames: Set<String>): Pair<SigningInfo, List<Finding>> {
+    /**
+     * [facts] come from the Android adapter, which owns the API-level branches:
+     * current signers vs certificate history, multi-signer and rotation flags.
+     * Everything after that — X.509 parsing, identity and scheme detection — is
+     * platform-free and shared with file scans.
+     */
+    fun evaluate(facts: SigningFacts, baseApkPath: String, zipNames: Set<String>): Pair<SigningInfo, List<Finding>> {
         val findings = ArrayList<Finding>()
         val notes = ArrayList<String>()
 
-        val certBytes: List<ByteArray> = if (Build.VERSION.SDK_INT >= 28) {
-            val si = pi.signingInfo
-            when {
-                si == null -> emptyList()
-                si.hasMultipleSigners() -> si.apkContentsSigners?.map { it.toByteArray() } ?: emptyList()
-                else -> si.signingCertificateHistory?.map { it.toByteArray() } ?: emptyList()
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            pi.signatures?.map { it.toByteArray() } ?: emptyList()
-        }
-
-        val certs = certBytes.mapNotNull {
+        val certs = facts.certBytes.mapNotNull {
             runCatching {
                 CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(it)) as X509Certificate
             }.getOrNull()
@@ -38,7 +31,7 @@ object SigningRules {
 
         val first = certs.firstOrNull()
         val debugCert = first != null && first.subjectX500Principal.name.contains("CN=Android Debug", ignoreCase = true)
-        val rotation = Build.VERSION.SDK_INT >= 28 && pi.signingInfo?.hasPastSigningCertificates() == true
+        val rotation = facts.rotationHistory
         val schemes = detectSchemes(baseApkPath, zipNames)
 
         if (debugCert) findings += Finding(
@@ -60,7 +53,7 @@ object SigningRules {
                 MessageDigest.getInstance("SHA-256").digest(it).joinToString("") { b -> "%02X".format(b) }
             },
             debugCert = debugCert,
-            multipleSigners = Build.VERSION.SDK_INT >= 28 && pi.signingInfo?.hasMultipleSigners() == true,
+            multipleSigners = facts.multipleSigners,
             rotationHistory = rotation,
             validFrom = first?.notBefore?.toString(),
             validTo = first?.notAfter?.toString(),

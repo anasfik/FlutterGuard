@@ -1,10 +1,5 @@
 package com.flutterguard.app.scan
 
-import android.content.Context
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageInfo
-import android.content.pm.PackageManager
-import android.os.Build
 import com.flutterguard.app.scan.parsers.AxmlDecoder
 import com.flutterguard.app.scan.parsers.AxmlNode
 import com.flutterguard.app.scan.parsers.ArscReader
@@ -23,13 +18,16 @@ import com.flutterguard.app.scan.rules.SigningRules
 import com.flutterguard.app.scan.rules.ThirdPartyRules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 import java.security.DigestInputStream
 import java.security.MessageDigest
 
 /** Thrown by [Scanner.scan] at a cancellation checkpoint after a cancel request. */
 class ScanCancelledException : Exception("Scan cancelled")
 
-/** End-to-end static audit of one installed application. */
+/** End-to-end static audit of one artifact, independent of Android. */
 object Scanner {
 
     private val skipContentExt = setOf("png", "jpg", "jpeg", "gif", "webp", "ttf", "otf", "zip", "gz", "zst", "mp3", "mp4", "so", "dex", "arsc", "bin", "webm", "woff", "woff2")
@@ -61,23 +59,22 @@ object Scanner {
      * [isCancelled] is polled at every named stage and inside the long
      * synchronous string loops, so cancellation does not wait for the scan to
      * finish. It throws [ScanCancelledException]; no partial report is produced.
+     *
+     * [install] is null for a picked file: identity comes from [target] and
+     * signing is read from the archive. [permissionProtection] replaces the
+     * platform permission lookup; the Android adapter supplies the real one.
      */
     suspend fun scan(
-        context: Context,
-        app: InstalledApp,
+        parts: List<ApkPart>,
+        target: ScanTarget,
+        install: InstallFacts? = null,
+        manifestHint: AxmlNode? = null,
         onProgress: (step: String, pct: Int) -> Unit,
         isCancelled: () -> Boolean = { false },
+        permissionProtection: (String) -> String = { "custom/unknown" },
     ): Report = withContext(Dispatchers.IO) {
-        val pm = context.packageManager
-        var flags = PackageManager.GET_ACTIVITIES or PackageManager.GET_SERVICES or
-            PackageManager.GET_RECEIVERS or PackageManager.GET_PROVIDERS or PackageManager.GET_PERMISSIONS
-        if (Build.VERSION.SDK_INT >= 28) flags = flags or PackageManager.GET_SIGNING_CERTIFICATES
-        // Resolved at scan time: the cached InstalledApp carries no platform object,
-        // and a package removed since discovery fails here visibly.
-        val pi = pm.getPackageInfo(app.packageName, flags)
-        val ai = pm.getApplicationInfo(app.packageName, 0)
-        ApkSource.forApplication(ai).use { src ->
-            scanWith(context, app, src, pi, ai, null, onProgress, isCancelled)
+        ApkSource(parts).use { src ->
+            scanWith(src, target, install, manifestHint, onProgress, isCancelled, permissionProtection)
         }
     }
 
@@ -88,10 +85,10 @@ object Scanner {
      * that is the installed-app scan path, unchanged.
      */
     suspend fun scanFile(
-        context: Context,
-        file: java.io.File,
+        file: File,
         onProgress: (step: String, pct: Int) -> Unit,
         isCancelled: () -> Boolean = { false },
+        permissionProtection: (String) -> String = { "custom/unknown" },
     ): Report = withContext(Dispatchers.IO) {
         ApkSource.forFile(file).use { src ->
             val root = src.bytes("AndroidManifest.xml", maxBytes = 8 * 1024 * 1024)
@@ -99,20 +96,16 @@ object Scanner {
                 ?: throw IllegalArgumentException("No readable AndroidManifest.xml in this file; is it an APK?")
             val meta = fileMeta(root, file.name)
                 ?: throw IllegalArgumentException("The manifest declares no package name.")
-            val app = InstalledApp(
+            val target = ScanTarget(
                 packageName = meta.packageName,
                 label = meta.label,
                 versionName = meta.versionName,
                 versionCode = meta.versionCode,
                 minSdk = meta.minSdk,
                 targetSdk = meta.targetSdk,
-                isFlutter = false,
                 isSystem = false,
-                sizeBytes = file.length(),
-                splitCount = 0,
-                icon = null,
             )
-            scanWith(context, app, src, pi = null, ai = null, manifestHint = root, onProgress, isCancelled)
+            scanWith(src, target, install = null, manifestHint = root, onProgress, isCancelled, permissionProtection)
         }
     }
 
@@ -170,17 +163,15 @@ object Scanner {
     }
 
     private suspend fun scanWith(
-        context: Context,
-        app: InstalledApp,
         src: ApkSource,
-        pi: PackageInfo?,
-        ai: ApplicationInfo?,
+        target: ScanTarget,
+        install: InstallFacts?,
         manifestHint: AxmlNode?,
         onProgress: (step: String, pct: Int) -> Unit,
         isCancelled: () -> Boolean,
+        permissionProtection: (String) -> String,
     ): Report {
         val started = System.currentTimeMillis()
-        val pm = context.packageManager
 
         fun check() {
             if (isCancelled()) throw ScanCancelledException()
@@ -199,9 +190,9 @@ object Scanner {
             // ---------- manifest ----------
             stage("Decoding AndroidManifest", 10)
             val manifest = manifestHint ?: src.bytes("AndroidManifest.xml")?.let { AxmlDecoder.decode(it) }
-            val targetSdk = ai?.targetSdkVersion?.takeIf { it > 0 } ?: app.targetSdk
+            val targetSdk = install?.targetSdk ?: target.targetSdk
             val (manifestFindings, facts) = if (manifest != null) {
-                ManifestRules.evaluate(context, manifest, targetSdk)
+                ManifestRules.evaluate(manifest, targetSdk, permissionProtection)
             } else emptyList<Finding>() to ManifestRules.ManifestFacts()
             findings += manifestFindings
 
@@ -213,16 +204,11 @@ object Scanner {
                 .mapNotNull { it.split("/").getOrNull(1) }
                 .toSortedSet()
                 .toList()
-            val installer = pi?.let {
-                runCatching {
-                    if (Build.VERSION.SDK_INT >= 30) pm.getInstallSourceInfo(app.packageName).installingPackageName
-                    else @Suppress("DEPRECATION") pm.getInstallerPackageName(app.packageName)
-                }.getOrNull()
-            }
+            val installer = install?.installer
 
             // ---------- resources ----------
             stage("Scanning resource strings", 20)
-            val scanner = SecretScanner(appTokens(app.packageName, app.label))
+            val scanner = SecretScanner(appTokens(target.packageName, target.label))
             val dexPrefixHits = LinkedHashMap<String, MutableSet<String>>()
             src.bytes("resources.arsc")?.let { arsc ->
                 for (s in ArscReader.globalStrings(arsc)) scanner.feed(s, Provenance("resources.arsc"), Layer.ARSC)
@@ -318,6 +304,38 @@ object Scanner {
                             libappAnalyzed = true
                         }
                         nativeLibs.add(NativeLib(base, primaryAbi, entry.second.size, sha.take(16) + "…", markers))
+                    }
+                }
+            }
+
+            // ---------- bounded Dart AOT snapshot header ----------
+            // The header is inside the compressed entry, so one bounded temp copy
+            // is extracted for seek+small-buffer reads; the library is never held
+            // in memory. Failure of any kind leaves the metadata unknown.
+            // ponytail: bounded temp copy (~4 MB); read the zip entry through a
+            // seekable channel if scan I/O ever becomes the bottleneck.
+            var snapshot: SnapshotMetadata? = null
+            val libappPath = primaryAbi?.let { "lib/$it/libapp.so" }
+            if (libappAnalyzed && libappPath != null) {
+                check()
+                val entry = src.entry(libappPath)
+                // A declared size of -1 means "unknown", not "too big": the copy
+                // below enforces the real cap either way.
+                if (entry != null && entry.second.size <= MAX_SNAPSHOT_BYTES) {
+                    val tmp = runCatching { File.createTempFile("fg-libapp", ".so") }.getOrNull()
+                    if (tmp != null) {
+                        try {
+                            val copied = runCatching {
+                                src.stream(libappPath)?.use { ins ->
+                                    tmp.outputStream().use { out ->
+                                        copyBounded(ins, out, MAX_SNAPSHOT_BYTES)
+                                    }
+                                } ?: false
+                            }.getOrDefault(false)
+                            if (copied) snapshot = DartSnapshot.read(tmp)
+                        } finally {
+                            tmp.delete()
+                        }
                     }
                 }
             }
@@ -465,8 +483,12 @@ object Scanner {
             findings += NetworkRules.evaluate(nsc, facts.usesCleartextTraffic, targetSdk ?: facts.targetSdkAttr, scanner.httpHosts, nscDeclared)
 
             stage("Verifying signing", 85)
-            val (signing, sigFindings) = if (pi != null && ai?.publicSourceDir != null) {
-                SigningRules.evaluate(pi, ai.publicSourceDir ?: "", zipNames)
+            val (signing, sigFindings) = if (install?.signing != null) {
+                SigningRules.evaluate(
+                    install.signing,
+                    src.primaryFile?.absolutePath ?: "",
+                    zipNames,
+                )
             } else {
                 SigningRules.forFile(src.primaryFile, zipNames)
             }
@@ -474,7 +496,7 @@ object Scanner {
 
             val (fwInfo, flutterFindings) = FlutterRules.evaluate(
                 zipNames, engineVersionString, libappAnalyzed, packageUriCount, camelCount, libappSha256,
-                kernelBlobBytes, snapshotBytes, kernelFiles,
+                kernelBlobBytes, snapshotBytes, kernelFiles, snapshot,
             )
             findings += flutterFindings
             val framework = fwInfo.copy(dartDeps = scanner.dartDeps.toList())
@@ -551,9 +573,10 @@ object Scanner {
                 id = "CRYPTO-X509",
                 title = "Certificate embedded in the app (${scanner.x509Certs.size})",
                 severity = Severity.INFO,
-                detail = "An X.509 certificate travels with the APK: " + scanner.x509Certs.joinToString("; ") +
-                    ". That is the identity the client trusts or pins — it names the backend and the key owner " +
-                    "even when no hostname is hardcoded.",
+                detail = "X.509 certificate material travels with the APK: " + scanner.x509Certs.joinToString("; ") +
+                    ". Certificates are embedded material, not proof that the app trusts or pins them at runtime: " +
+                    "the DN names a subject and issuer, and nothing here confirms the matching private key is absent " +
+                    "or that the host is contacted.",
                 evidence = scanner.x509Certs.map { Evidence("x509", 0, it) },
                 remediation = "Expected for pinned backends; make sure the matching private key is server-side only.",
                 masvs = listOf("MASVS-NETWORK-2"),
@@ -603,23 +626,22 @@ object Scanner {
             val all = findings.sortedBy { it.severity }
             val counts = Severity.entries.associateWith { s -> all.count { it.severity == s } }
             val meta = AppMeta(
-                packageName = app.packageName,
-                label = app.label,
-                versionName = pi?.versionName ?: app.versionName,
-                versionCode = pi?.let { if (Build.VERSION.SDK_INT >= 28) it.longVersionCode else it.versionCode.toLong() }
-                    ?: app.versionCode,
-                minSdk = facts.minSdkAttr ?: ai?.minSdkVersion?.takeIf { it > 0 } ?: app.minSdk,
+                packageName = target.packageName,
+                label = target.label,
+                versionName = install?.versionName ?: target.versionName,
+                versionCode = install?.versionCode ?: target.versionCode,
+                minSdk = facts.minSdkAttr ?: install?.minSdk ?: target.minSdk,
                 targetSdk = targetSdk ?: facts.targetSdkAttr,
                 installer = installer,
-                firstInstallMs = pi?.firstInstallTime ?: 0,
-                lastUpdateMs = pi?.lastUpdateTime ?: 0,
-                isSystem = app.isSystem,
+                firstInstallMs = install?.firstInstallMs ?: 0,
+                lastUpdateMs = install?.lastUpdateMs ?: 0,
+                isSystem = target.isSystem,
                 sizeBytes = sizeBytes,
                 splitCount = (src.partCount - 1).coerceAtLeast(0),
                 abis = abis,
                 nativeLibs = nativeLibs,
                 baseSha256 = src.primaryFile?.let { runCatching { ApkSource.sha256(it) }.getOrNull() } ?: "",
-                fileScan = pi == null,
+                fileScan = install == null,
             )
             val stats = ReportStats(
                 critical = counts[Severity.CRITICAL] ?: 0,
@@ -629,8 +651,12 @@ object Scanner {
                 info = counts[Severity.INFO] ?: 0,
                 stringsScanned = scanner.stringsScanned,
                 durationMs = System.currentTimeMillis() - started,
+                confirmed = all.count { it.kind == FindingKind.CONFIRMED },
+                suspected = all.count { it.kind == FindingKind.SUSPECTED },
+                informational = all.count { it.kind == FindingKind.INFORMATIONAL },
             )
-            val grade = gradeOf(stats.critical, stats.high, stats.medium, stats.low)
+            // Only confirmed artifact facts grade the app; leads stay findings.
+            val grade = gradeOf(all)
             // Notable artifact rows only: the full inventory is browsable live
             // through ApkSource; the report carries a bounded, deterministic subset.
             val notableCategories = setOf(
@@ -817,5 +843,25 @@ object Scanner {
                 }
             }
         }
+    }
+}
+
+/** Hard ceiling for the bounded `libapp.so` temp copy (and its declared size gate). */
+internal const val MAX_SNAPSHOT_BYTES = 256L shl 20
+
+/**
+ * Streams at most [limit] bytes. Returns false and writes nothing past the cap
+ * when the source turns out to be larger than it declared — the copy must never
+ * trust a zip entry's `size`.
+ */
+internal fun copyBounded(ins: InputStream, out: OutputStream, limit: Long): Boolean {
+    val buf = ByteArray(64 * 1024)
+    var total = 0L
+    while (true) {
+        val n = ins.read(buf)
+        if (n < 0) return true
+        total += n
+        if (total > limit) return false
+        out.write(buf, 0, n)
     }
 }

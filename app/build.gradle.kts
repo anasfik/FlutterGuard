@@ -79,6 +79,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":engine"))
     testImplementation("junit:junit:4.13.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")

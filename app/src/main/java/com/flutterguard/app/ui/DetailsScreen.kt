@@ -77,6 +77,7 @@ import com.flutterguard.app.scan.ArtifactEntry
 import com.flutterguard.app.scan.DeepLink
 import com.flutterguard.app.scan.Evidence
 import com.flutterguard.app.scan.Finding
+import com.flutterguard.app.scan.FindingKind
 import com.flutterguard.app.scan.InstalledApp
 import com.flutterguard.app.scan.PubPackage
 import com.flutterguard.app.scan.Report
@@ -370,6 +371,10 @@ private fun OverviewSection(
                     InfoLine("Obfuscated", report.framework.obfuscated?.toString() ?: ReportMetadata.UNAVAILABLE)
                     report.framework.kernelBlobBytes?.let { InfoLine("kernel_blob.bin", "${humanBytes(it)} — readable Dart") }
                     report.framework.snapshotBytes?.takeIf { it > 0 }?.let { InfoLine("JIT snapshots", humanBytes(it)) }
+                    // Bounded header fact: kind + opaque hash, never an engine version.
+                    report.framework.snapshotKind?.let {
+                        InfoLine("Dart snapshot", "$it — ${report.framework.snapshotHash ?: ReportMetadata.UNAVAILABLE}")
+                    }
                     if (report.framework.engineDebug) InfoLine("Engine", "debug build")
                     if (report.framework.dartDeps.isNotEmpty()) {
                         InfoLine("Dart deps", "${report.framework.dartDeps.size} recovered (see Explore)")
@@ -582,6 +587,19 @@ private fun GradeCard(report: Report) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
+                        "Only confirmed artifact facts are graded; leads worth checking and inventory are listed " +
+                            "but never scored. A grade is not a security guarantee.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "${report.findings.count { it.kind == FindingKind.CONFIRMED }} confirmed · " +
+                            "${report.findings.count { it.kind == FindingKind.SUSPECTED }} leads · " +
+                            "${report.findings.count { it.kind == FindingKind.INFORMATIONAL }} inventory",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
                         "${report.stats.stringsScanned} strings · ${report.stats.durationMs / 1000}s",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -640,6 +658,7 @@ private fun DeepLinkLine(link: DeepLink) {
 @Composable
 private fun FindingsSection(report: Report, listState: LazyListState) {
     val secrets = report.secretValues()
+    val groups = remember(report.findings) { findingGroups(report.findings) }
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -648,7 +667,9 @@ private fun FindingsSection(report: Report, listState: LazyListState) {
     ) {
         item {
             Text(
-                "Deterministic static matches with provenance. A match is evidence, not confirmed exploitability.",
+                "Confirmed artifact facts come from decoded configuration and material — they do not prove " +
+                    "exploitability. Leads are string patterns worth checking; inventory is context. The grade " +
+                    "counts confirmed facts only.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -656,11 +677,36 @@ private fun FindingsSection(report: Report, listState: LazyListState) {
         if (report.findings.isEmpty()) {
             item { EmptyState("No findings", "The rules found nothing matching in the readable artifacts.") }
         } else {
-            items(report.findings.sortedBy { it.severity }) { finding ->
-                FindingCard(finding, report.meta.packageName, secrets)
+            groups.forEach { (kind, findings) ->
+                item(key = "finding-group-$kind") {
+                    Text(
+                        "${findingGroupLabel(kind)} (${findings.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(top = Space.l).semantics { heading() },
+                    )
+                }
+                items(findings) { finding ->
+                    FindingCard(finding, report.meta.packageName, secrets)
+                }
             }
         }
     }
+}
+
+/**
+ * Findings grouped by what the artifact proves, in one fixed order:
+ * confirmed facts, leads, inventory. Empty groups are kept so a scan that
+ * confirmed nothing says "0" instead of hiding the distinction.
+ */
+internal fun findingGroups(findings: List<Finding>): List<Pair<FindingKind, List<Finding>>> =
+    FindingKind.entries.map { kind ->
+        kind to findings.filter { it.kind == kind }.sortedBy { it.severity }
+    }
+
+internal fun findingGroupLabel(kind: FindingKind): String = when (kind) {
+    FindingKind.CONFIRMED -> "Confirmed artifact facts"
+    FindingKind.SUSPECTED -> "Leads worth checking"
+    FindingKind.INFORMATIONAL -> "Inventory"
 }
 
 @Composable
@@ -1569,7 +1615,7 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                     val sensitive = settings.exportSensitive(choice.sensitive)
                     exportJob = scope.launch {
                         val result = withContext(Dispatchers.IO) {
-                            runCatching { ReportExport.writeFile(context, report, ext, sections, sensitive) }
+                            runCatching { ReportExport.writeFile(context.cacheDir, report, ext, sections, sensitive) }
                         }
                         result.onSuccess { file -> shareReportFile(context, file, ext) }
                             .onFailure {

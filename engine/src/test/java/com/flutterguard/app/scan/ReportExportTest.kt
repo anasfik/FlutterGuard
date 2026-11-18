@@ -187,6 +187,32 @@ class ReportExportTest {
     }
 
     @Test
+    fun jsonPayloadCarriesPerFindingKindAndKindCounts() {
+        val payload = ReportExport.payload(report(), ReportExport.allSections)
+        assertEquals("the export schema is the one the decoder accepts", ReportJson.SCHEMA, payload["schema"])
+        val finding = map((payload["findings"] as List<*>).single())
+        // SEC-KEY-GENERIC is a capture-group credential shape: a lead, not a fact.
+        assertEquals("SUSPECTED", finding["kind"])
+        val stats = map(payload["stats"])
+        assertEquals(0, stats["confirmed"])
+        assertEquals(1, stats["suspected"])
+        assertEquals(0, stats["informational"])
+        // Existing totals are untouched.
+        assertEquals(1, stats["medium"])
+        assertFalse("kind must not widen what an export reveals", payload.toString().contains(secret))
+    }
+
+    @Test
+    fun markdownLabelsEveryFindingWithItsKindAndCountsThem() {
+        val md = ReportExport.toMarkdown(report())
+        assertTrue("the finding's kind must be visible: $md", md.contains("SUSPECTED"))
+        assertTrue("kind counts belong in the grade line: $md", md.contains("0 confirmed"))
+        assertTrue(md.contains("1 suspected"))
+        assertTrue(md.contains("0 informational"))
+        assertFalse("labelling must not reveal the value", md.contains(secret))
+    }
+
+    @Test
     fun evidenceFieldsScrubsTheSourcePath() {
         val e = Evidence("assets/$secret.env", 0, "masked")
         val fields = ReportExport.evidenceFields(e, sensitive = false, secrets = listOf(secret)).toMap()

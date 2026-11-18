@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
+import com.flutterguard.app.scan.AndroidScan
 import com.flutterguard.app.scan.Discovery
 import com.flutterguard.app.scan.History
 import com.flutterguard.app.scan.Report
@@ -23,7 +24,6 @@ import com.flutterguard.app.scan.ScanCancelledException
 import com.flutterguard.app.scan.ScanJob
 import com.flutterguard.app.scan.ScanStore
 import com.flutterguard.app.scan.ScanToken
-import com.flutterguard.app.scan.Scanner
 import com.flutterguard.app.ui.ScanNotifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -187,7 +187,7 @@ class ScanService : Service() {
                 // started, so the report still records the package it declared.
                 ReportFiles.markInflight(dir, packageName, fileScan)
                 previous = if (settings.keepHistory) ReportFiles.previousHistory(dir, packageName, true) else null
-                report = Scanner.scanFile(this, file, onProgress, isCancelled)
+                report = AndroidScan.scanFile(this, file, onProgress, isCancelled)
             } else {
                 val app = try {
                     Discovery.load(this, packageName)
@@ -200,7 +200,7 @@ class ScanService : Service() {
                 ReportFiles.markInflight(dir, packageName, fileScan)
                 previous = if (settings.keepHistory) ReportFiles.previousHistory(dir, packageName) else null
 
-                report = Scanner.scan(
+                report = AndroidScan.scan(
                     context = this,
                     app = app,
                     onProgress = onProgress,

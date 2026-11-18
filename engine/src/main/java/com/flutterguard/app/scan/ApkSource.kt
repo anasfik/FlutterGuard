@@ -216,20 +216,6 @@ class ApkSource(parts: List<ApkPart>) : AutoCloseable {
         fun sha256(bytes: ByteArray): String =
             MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
-        fun forApplication(ai: android.content.pm.ApplicationInfo): ApkSource {
-            val parts = ArrayList<ApkPart>()
-            val base = ai.publicSourceDir ?: ai.sourceDir
-            if (base != null) parts.add(ApkPart(File(base), "base"))
-            val splits = ai.splitSourceDirs
-            if (splits != null) {
-                for (s in splits) {
-                    val f = File(s)
-                    parts.add(ApkPart(f, f.name.removeSuffix(".apk")))
-                }
-            }
-            return ApkSource(parts)
-        }
-
         /**
          * File-backed variant: one picked or shared APK with the role "file".
          * The scanner treats it like a base part, so findings, exports and
