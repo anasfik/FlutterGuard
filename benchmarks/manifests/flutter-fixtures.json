@@ -1,0 +1,216 @@
+{
+  "manifestVersion": 1,
+  "name": "owned-flutter-fixtures",
+  "notes": "Assertions are planted artifact facts from benchmark-app source, compiled resources and packaged entries, each pinned to a SHA-256. They are exposure/evidence assertions: no credential is valid and none of the inputs is exploitable.",
+  "samples": [
+    {
+      "id": "fixture-debug",
+      "path": "benchmark-app/dist/benchmark-debug.apk",
+      "sha256": "e7a6920384b762100e8dd4bf8e72caba799d4bb5d6cb2107f931e088e0666f43",
+      "required": true,
+      "package": "dev.flutterguard.benchmark_app",
+      "assertions": [
+        {
+          "id": "flutter-presence",
+          "kind": "field",
+          "field": "framework.isFlutter",
+          "expect": true,
+          "source": "ZIP contains assets/flutter_assets/kernel_blob.bin and lib/arm64-v8a/libflutter.so (independent zipfile inspection of the pinned digest)."
+        },
+        {
+          "id": "debuggable-artifact",
+          "kind": "finding",
+          "rule": "MAN-DEBUG",
+          "expect": "present",
+          "source": "Compiled AndroidManifest.xml reports application-debuggable (aapt2 36.1.0 dump badging); debug build type."
+        },
+        {
+          "id": "jit-kernel-shipped",
+          "kind": "finding",
+          "rule": "FLUT-DEBUG-BUILD",
+          "expect": "present",
+          "source": "ZIP contains assets/flutter_assets/kernel_blob.bin; no libapp.so. Semantic: JIT kernel present in the artifact."
+        },
+        {
+          "id": "exported-activity",
+          "kind": "finding",
+          "rule": "MAN-EXPORTED-activity",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml:33-41 declares .BenchmarkExportedActivity with android:exported=true and no permission; verified in the compiled manifest with aapt2 xmltree. Semantic: exported component exists, not that it is exploitable."
+        },
+        {
+          "id": "nsc-cleartext",
+          "kind": "finding",
+          "rule": "NET-CLEARTEXT",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/res/xml/network_security_config.xml:5 sets base-config cleartextTrafficPermitted=true; compiled res/xml/network_security_config.xml verified with aapt2 xmltree. Semantic: policy permits cleartext, and the app has no INTERNET permission."
+        },
+        {
+          "id": "nsc-user-ca",
+          "kind": "finding",
+          "rule": "NET-USERCA",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/res/xml/network_security_config.xml:8-9 trusts certificates src=user in base-config; verified in compiled NSC. Semantic: user CAs are trusted, not that interception occurred."
+        },
+        {
+          "id": "dotenv-asset",
+          "kind": "finding",
+          "rule": "AST-DOTENV",
+          "expect": "present",
+          "source": "benchmark-app/assets/test.env is registered in pubspec.yaml and packaged byte-identical at assets/flutter_assets/assets/test.env (zipfile inspection). Semantic: plaintext environment file is readable from the APK."
+        },
+        {
+          "id": "provider-shaped-lead",
+          "kind": "finding",
+          "rule": "SEC-KEY-OPENAI-PROJECT",
+          "expect": "present",
+          "source": "benchmark-app/lib/main.dart:9-10 plants a synthetic sk-proj- literal; the exact literal is present in kernel_blob.bin bytes. Semantic: provider-shaped lead only; it is not a valid credential."
+        }
+      ]
+    },
+    {
+      "id": "fixture-obfuscated-release",
+      "path": "benchmark-app/dist/benchmark-obfuscated-release.apk",
+      "sha256": "6c9f1b3634fcd107dc7153cd0011ec6f711baa69d82eb2e014921add65fc7f1d",
+      "required": true,
+      "package": "dev.flutterguard.benchmark_app",
+      "assertions": [
+        {
+          "id": "flutter-presence",
+          "kind": "field",
+          "field": "framework.isFlutter",
+          "expect": true,
+          "source": "ZIP contains lib/arm64-v8a/libapp.so and lib/arm64-v8a/libflutter.so (independent zipfile inspection of the pinned digest)."
+        },
+        {
+          "id": "not-debuggable",
+          "kind": "finding",
+          "rule": "MAN-DEBUG",
+          "expect": "absent",
+          "source": "Compiled AndroidManifest.xml has no application-debuggable (aapt2 36.1.0 dump badging); release build type."
+        },
+        {
+          "id": "no-jit-kernel",
+          "kind": "finding",
+          "rule": "FLUT-DEBUG-BUILD",
+          "expect": "absent",
+          "source": "ZIP has no assets/flutter_assets/kernel_blob.bin and does have lib/arm64-v8a/libapp.so."
+        },
+        {
+          "id": "aot-present",
+          "kind": "finding",
+          "rule": "FLUT-NO-AOT",
+          "expect": "absent",
+          "source": "ZIP contains lib/arm64-v8a/libapp.so, so the artifact is not missing its AOT library."
+        },
+        {
+          "id": "exported-activity",
+          "kind": "finding",
+          "rule": "MAN-EXPORTED-activity",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml:33-41 explicit exported=true without permission; verified in the compiled manifest with aapt2 xmltree."
+        },
+        {
+          "id": "nsc-cleartext",
+          "kind": "finding",
+          "rule": "NET-CLEARTEXT",
+          "expect": "present",
+          "source": "Same planted NSC source; the compiled release document is res/8G.xml (resource paths shortened) and still has base-config cleartextTrafficPermitted=true, verified with aapt2 xmltree."
+        },
+        {
+          "id": "nsc-user-ca",
+          "kind": "finding",
+          "rule": "NET-USERCA",
+          "expect": "present",
+          "source": "Compiled release res/8G.xml still has trust-anchors certificates src=user, verified with aapt2 xmltree."
+        },
+        {
+          "id": "dotenv-asset",
+          "kind": "finding",
+          "rule": "AST-DOTENV",
+          "expect": "present",
+          "source": "assets/test.env is packaged byte-identical at assets/flutter_assets/assets/test.env (zipfile inspection); obfuscation does not remove assets."
+        },
+        {
+          "id": "provider-shaped-lead",
+          "kind": "finding",
+          "rule": "SEC-KEY-OPENAI-PROJECT",
+          "expect": "present",
+          "source": "The exact synthetic sk-proj- literal is present in lib/arm64-v8a/libapp.so bytes; string literals survive Dart obfuscation. Semantic: provider-shaped lead only."
+        }
+      ]
+    },
+    {
+      "id": "fixture-plain-release",
+      "path": "benchmark-app/dist/benchmark-plain-release.apk",
+      "sha256": "3597a330d32c8c450369c9ae549f610c351b46edf7b7c3271a4f43f4011c19de",
+      "required": true,
+      "package": "dev.flutterguard.benchmark_app",
+      "assertions": [
+        {
+          "id": "flutter-presence",
+          "kind": "field",
+          "field": "framework.isFlutter",
+          "expect": true,
+          "source": "ZIP contains lib/arm64-v8a/libapp.so and lib/arm64-v8a/libflutter.so (independent zipfile inspection of the pinned digest)."
+        },
+        {
+          "id": "not-debuggable",
+          "kind": "finding",
+          "rule": "MAN-DEBUG",
+          "expect": "absent",
+          "source": "Compiled AndroidManifest.xml has no application-debuggable (aapt2 36.1.0 dump badging); release build type."
+        },
+        {
+          "id": "no-jit-kernel",
+          "kind": "finding",
+          "rule": "FLUT-DEBUG-BUILD",
+          "expect": "absent",
+          "source": "ZIP has no assets/flutter_assets/kernel_blob.bin and does have lib/arm64-v8a/libapp.so."
+        },
+        {
+          "id": "aot-present",
+          "kind": "finding",
+          "rule": "FLUT-NO-AOT",
+          "expect": "absent",
+          "source": "ZIP contains lib/arm64-v8a/libapp.so, so the artifact is not missing its AOT library."
+        },
+        {
+          "id": "exported-activity",
+          "kind": "finding",
+          "rule": "MAN-EXPORTED-activity",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml:33-41 explicit exported=true without permission; verified in the compiled manifest with aapt2 xmltree."
+        },
+        {
+          "id": "nsc-cleartext",
+          "kind": "finding",
+          "rule": "NET-CLEARTEXT",
+          "expect": "present",
+          "source": "Same planted NSC source; the compiled release document is res/8G.xml and still has base-config cleartextTrafficPermitted=true, verified with aapt2 xmltree."
+        },
+        {
+          "id": "nsc-user-ca",
+          "kind": "finding",
+          "rule": "NET-USERCA",
+          "expect": "present",
+          "source": "Compiled release res/8G.xml still has trust-anchors certificates src=user, verified with aapt2 xmltree."
+        },
+        {
+          "id": "dotenv-asset",
+          "kind": "finding",
+          "rule": "AST-DOTENV",
+          "expect": "present",
+          "source": "assets/test.env is packaged byte-identical at assets/flutter_assets/assets/test.env (zipfile inspection)."
+        },
+        {
+          "id": "provider-shaped-lead",
+          "kind": "finding",
+          "rule": "SEC-KEY-OPENAI-PROJECT",
+          "expect": "present",
+          "source": "The exact synthetic sk-proj- literal is present in lib/arm64-v8a/libapp.so bytes. Semantic: provider-shaped lead only, not a valid credential."
+        }
+      ]
+    }
+  ]
+}

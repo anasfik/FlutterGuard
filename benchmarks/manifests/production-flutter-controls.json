@@ -1,0 +1,39 @@
+{
+  "manifestVersion": 1,
+  "name": "production-flutter-controls",
+  "notes": "Optional local corpus controls, not committed. Only framework presence/absence is judged; every other reported rule for these APKs is unjudged. Digest entries were transcribed from independent aapt2/ZIP inspection, never from scanner output.",
+  "samples": [
+    {
+      "id": "control-primal-3.5.28-nonflutter",
+      "path": "primal-3.5.28.apk",
+      "sha256": "72a4221feab750fbb944e0339aa0a35b6c42459e756bd512704ee85bb1d7da4b",
+      "required": false,
+      "package": "net.primal.android",
+      "assertions": [
+        {
+          "id": "flutter-presence",
+          "kind": "field",
+          "field": "framework.isFlutter",
+          "expect": false,
+          "source": "ZIP entry inspection of the pinned digest shows neither libapp.so nor libflutter.so; net.primal.android 3.5.28. Semantic: negative Flutter-presence control only."
+        }
+      ]
+    },
+    {
+      "id": "control-rustdesk-1.5.0-flutter",
+      "path": "rustdesk-1.5.0-aarch64-signed.apk",
+      "sha256": "dc37d05c0d382455e19cf9acc9dc89f7f8cf01264b2643fb4f71f6bb15bf9b4f",
+      "required": false,
+      "package": "com.carriez.flutter_hbb",
+      "assertions": [
+        {
+          "id": "flutter-presence",
+          "kind": "field",
+          "field": "framework.isFlutter",
+          "expect": true,
+          "source": "ZIP entry inspection of the pinned digest shows arm64 libapp.so and libflutter.so; com.carriez.flutter_hbb 1.5.0. Semantic: positive Flutter-presence control only."
+        }
+      ]
+    }
+  ]
+}

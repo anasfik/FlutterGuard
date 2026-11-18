@@ -1,0 +1,18 @@
+name: benchmark_app
+description: "Synthetic FlutterGuard benchmark fixture (unsafe, local-only)"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+# Deliberately no third-party packages: the fixture must resolve and build
+# from the cached Flutter SDK alone, with no network access.
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/test.env
