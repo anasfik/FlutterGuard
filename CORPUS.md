@@ -8,6 +8,9 @@ in `/tmp/opencode/man*/` and the device reports in `/tmp/opencode/survey/`.
 
 APKs are kept out of the repo in `~/Downloads/.fgcorpus/{apks,apks2}`.
 
+The public, app-anonymous write-up covering this corpus and the wider 26-APK release study is
+[flutterguard.dev/flutter-release-corpus](https://flutterguard.dev/flutter-release-corpus/).
+
 | App | Package | Build | Why it is in the corpus |
 |---|---|---|---|
 | Bztamy | `com.bzta.my` | debug / JIT | Kernel blob, no `libapp.so`, debuggable, live API |
