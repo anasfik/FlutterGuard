@@ -339,6 +339,17 @@ private fun OverviewSection(
 
     val permissionWindow = preview(report.permissions)
     val linkWindow = preview(report.deepLinks)
+    // The unbounded comparison is the real change set; `diff` is its summary and
+    // the count must come from the comparison, never from the capped list.
+    val comparison = remember(log, packageName, report.meta.fileScan) {
+        History.comparisonForPreviousScan(
+            log,
+            log.lastIndex,
+            packageName,
+            if (report.meta.fileScan) ScanNamespace.FILE else ScanNamespace.INSTALLED,
+        )
+    }
+    val totalChanges = diffTotalChanges(comparison, diff)
 
     LazyColumn(
         state = listState,
@@ -351,7 +362,8 @@ private fun OverviewSection(
             item {
                 DiffCard(
                     diff = diff,
-                    onSeeAll = if (diff.size > DIFF_PREVIEW) {
+                    totalChanges = totalChanges,
+                    onSeeAll = if (totalChanges > DIFF_PREVIEW) {
                         { onSeeAll(SeeAllTarget.DIFF, "") }
                     } else null,
                 )
@@ -515,7 +527,8 @@ private fun ScanLogCard(log: List<ScanLogEntry>, historyEnabled: Boolean, onSeeA
                 )
                 val diff = ScanLog.diffForPreviousVersion(log, index)
                 if (diff.isNotEmpty()) {
-                    Text("vs previous v${entry.versionName}", style = MaterialTheme.typography.labelSmall)
+                    // The baseline is the previous recorded *version*, not this row.
+                    Text(scanLogDiffLabel(diff).orEmpty(), style = MaterialTheme.typography.labelSmall)
                     diff.take(6).forEach { line ->
                         Text(
                             line,
@@ -642,8 +655,10 @@ private fun StatLine(label: String, count: Int, severity: com.flutterguard.app.s
 }
 
 @Composable
-private fun DiffCard(diff: List<String>, onSeeAll: (() -> Unit)?) {
-    val window = preview(diff, DIFF_PREVIEW)
+private fun DiffCard(diff: List<String>, totalChanges: Int, onSeeAll: (() -> Unit)?) {
+    // Bounded preview over the summary, but the footer total is the complete
+    // change count: a 40-line summary must not report itself as the whole diff.
+    val window = SectionWindow(diff.take(DIFF_PREVIEW), maxOf(totalChanges, diff.size))
     SectionCard("Changes since last scan") {
         window.visible.forEach { line ->
             Text(
@@ -1547,11 +1562,26 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
     var exportJob by remember { mutableStateOf<Job?>(null) }
 
     // The comparison is rebuilt from the retained log, so opening this dialog
-    // never scans and a first scan simply has nothing to compare.
+    // never scans. It must be this report's own pair: an older retained report
+    // must not export the newest log pair, and history-off means no comparison.
     val log = rememberScanLog(report.meta.packageName, report.generatedAt, report.meta.fileScan)
     val namespace = if (report.meta.fileScan) ScanNamespace.FILE else ScanNamespace.INSTALLED
-    val comparison = remember(log, report) {
-        History.comparison(log, log.lastIndex, report.meta.packageName, namespace)
+    val historyEnabled = settings.keepHistory
+    val comparison = remember(log, report, historyEnabled) {
+        if (!historyEnabled) {
+            null
+        } else {
+            val viewed = log.indexOfLast {
+                it.versionCode == report.meta.versionCode &&
+                    it.versionName == (report.meta.versionName ?: "?")
+            }
+            History.comparison(
+                log,
+                if (viewed >= 0) viewed else log.lastIndex,
+                report.meta.packageName,
+                namespace,
+            )
+        }
     }
 
     AlertDialog(
@@ -1600,7 +1630,11 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                         Text("Comparison with previous version", style = MaterialTheme.typography.titleSmall)
                         Text(
                             if (comparison == null) {
-                                "Not available: this is the first recorded scan of this app, so there is nothing to compare yet."
+                                if (!historyEnabled) {
+                                    "Scan history is turned off in Settings, so no comparison is available."
+                                } else {
+                                    "Not available: this scan has no earlier recorded version to compare with."
+                                }
                             } else {
                                 "Writes one ${if (choice.json) "JSON" else "Markdown"} document of what changed " +
                                     "between ${comparison.before.versionLabel} and ${comparison.after.versionLabel} " +

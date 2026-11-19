@@ -36,7 +36,9 @@ class HistoryLogTest {
         signing = SigningInfo(
             signerSubject = null,
             signerIssuer = null,
-            sha256Fingerprint = null,
+            // A recovered fingerprint keeps the signing category comparable, so
+            // the exact diff lists below carry no "unavailable" notes.
+            sha256Fingerprint = "AA:BB:CC",
             debugCert = false,
             multipleSigners = false,
             rotationHistory = false,
@@ -170,8 +172,9 @@ class HistoryLogTest {
 
     @Test
     fun aValueContainingTheBlockSeparatorRoundTripsAsOneEntry() {
-        // Artifact text is attacker-controlled; a route/host containing the
-        // separator must not split the snapshot into two bogus entries.
+        // Artifact text is attacker-controlled. Snapshot values are flattened, so
+        // one cannot write the separator through History.snapshot; a hand-written
+        // or legacy block still must not split.
         val nasty = report(
             "1.0.0",
             1,
@@ -179,9 +182,10 @@ class HistoryLogTest {
             generatedAt = 1_700_000_000_000,
             hosts = listOf("a.example\n#---\nhosts:evil.example"),
         )
-        val snapshot = History.snapshot(nasty)
-        assertTrue(snapshot, snapshot.contains("\n#---\n"))
+        val flattened = History.snapshot(nasty)
+        assertFalse("values must not span lines: $flattened", flattened.contains("\n#---\n"))
 
+        val snapshot = "version:1.0.0 (1)\nhosts:a.example\n#---\nhosts:evil.example\nroutes:\nfindings:\ndeps:"
         val log = ScanLog.append(null, snapshot)
         val entries = ScanLog.decode(log)
         assertEquals(1, entries.size)

@@ -43,12 +43,15 @@ import androidx.compose.ui.unit.dp
 import com.flutterguard.app.scan.AndroidScan
 import com.flutterguard.app.scan.ApkSource
 import com.flutterguard.app.scan.ArtifactEntry
+import com.flutterguard.app.scan.History
 import com.flutterguard.app.scan.HostInfo
 import com.flutterguard.app.scan.PubPackage
 import com.flutterguard.app.scan.Report
+import com.flutterguard.app.scan.ReportComparison
 import com.flutterguard.app.scan.ReportFiles
 import com.flutterguard.app.scan.ScanLog
 import com.flutterguard.app.scan.ScanLogEntry
+import com.flutterguard.app.scan.ScanNamespace
 import com.flutterguard.app.scan.ScanPhase
 import com.flutterguard.app.scan.StoredReport
 import com.flutterguard.app.scan.displayName
@@ -221,11 +224,21 @@ internal fun SectionRoute(
             filterDependencies(report.framework.dartDeps, destination.filter)
         }
         // Same change set the inline card previewed: newest retained scan against
-        // the scan before it, not against another version.
+        // the scan before it, not against another version. The comparison is the
+        // unbounded source; the diff below is only the summary/fallback.
         val latestDiff = remember(log) {
             if (log.isEmpty()) emptyList() else ScanLog.diffForPreviousScan(log, log.lastIndex)
         }
-        val rows = remember(destination.target, report, groups, filteredArtifacts, secrets, log, hosts, deps, latestDiff) {
+        val latestComparison = remember(log, packageName, destination.fileScan) {
+            History.comparisonForPreviousScan(
+                log,
+                log.lastIndex,
+                packageName,
+                if (destination.fileScan) ScanNamespace.FILE else ScanNamespace.INSTALLED,
+            )
+        }
+        val diffLines = remember(latestComparison, latestDiff) { diffSeeAllLines(latestComparison, latestDiff) }
+        val rows = remember(destination.target, report, groups, filteredArtifacts, secrets, log, hosts, deps, diffLines) {
             SeeAllRows.of(
                 target = destination.target,
                 report = report,
@@ -235,7 +248,7 @@ internal fun SectionRoute(
                 log = log,
                 hosts = hosts,
                 deps = deps,
-                diff = latestDiff,
+                diff = diffLines,
             )
         }
 
@@ -277,6 +290,27 @@ fun <T> preview(items: List<T>, limit: Int = PREVIEW_ROWS): SectionWindow<T> =
 
 fun <T> seeAllPage(items: List<T>, limit: Int = SEE_ALL_MAX): SectionWindow<T> =
     SectionWindow(if (limit <= 0) emptyList() else items.take(limit), items.size)
+
+/**
+ * Complete change lines for the See-all route. The unbounded comparison wins;
+ * the 40-line history summary is only a fallback when no comparison exists.
+ */
+internal fun diffSeeAllLines(comparison: ReportComparison?, fallback: List<String>): List<String> =
+    comparison?.let { History.changeLines(it) }?.takeIf { it.isNotEmpty() } ?: fallback
+
+/** Total change rows a footer may claim; never the truncated summary's own size. */
+internal fun diffTotalChanges(comparison: ReportComparison?, fallback: List<String>): Int =
+    diffSeeAllLines(comparison, fallback).size
+
+/**
+ * Scan-log delta label. The baseline is selected by version, not by row, so the
+ * row's own version must never be named as the thing it was compared with.
+ */
+internal fun scanLogDiffLabel(diff: List<String>): String? = when {
+    diff.isEmpty() -> null
+    diff.any { it.startsWith("~ version") } -> "vs previous recorded version"
+    else -> "vs previous scan of the same version"
+}
 
 /** Dedicated list route behind every long section. */
 enum class SeeAllTarget(val title: String, val noun: String, val searchable: Boolean) {

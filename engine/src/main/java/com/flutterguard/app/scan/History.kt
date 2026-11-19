@@ -22,9 +22,10 @@ object History {
     private const val DEPS = "deps:"
     private const val VERSION = "version:"
 
-    /** Extension marker + the categories this snapshot actually recorded. */
+    /** Extension marker, format version, recorded package and the categories written. */
     private const val CMP = "cmp2:"
     private const val CMP_VERSION = "1"
+    private const val PKG_ATTR = "pkg="
     private const val CUT = "cut:"
     private const val PERM = "perm:"
     private const val PROVIDER = "provider:"
@@ -58,36 +59,49 @@ object History {
     fun snapshot(r: Report): String = buildString {
         val scrub = Evidence.prepared(r.secretValues())
         val findingFacts = r.findings.flatMap { finding ->
+            val id = flat(finding.id)
             finding.evidence
-                .map { scrub(it.source.ifBlank { "artifact" }) }
+                .map { flat(scrub(it.source.ifBlank { "artifact" })) }
                 .ifEmpty { listOf("artifact") }
-                .map { source -> FindingSnapshot(finding.id, finding.severity, finding.kind, source) }
-        }.distinct().sortedWith(
-            compareBy({ it.id }, { it.source }, { it.severity.ordinal }, { it.kind.ordinal }),
+                .map { source -> FindingSnapshot(id, finding.severity, finding.kind, source) }
+        }
+        // Aggregate first: three identical matches are one fact with a count,
+        // never a silently deduplicated row.
+        val counts = LinkedHashMap<String, Pair<FindingSnapshot, Int>>()
+        for (fact in findingFacts) {
+            val key = fact.key()
+            counts[key] = fact to ((counts[key]?.second ?: 0) + 1)
+        }
+        val ordered = counts.values.sortedWith(
+            compareBy({ it.first.id }, { it.first.source }, { it.first.severity.ordinal }, { it.first.kind.ordinal }),
         )
-        val network = findingFacts.filter { it.id.startsWith("NET-") }
-        val keptFindings = findingFacts.filterNot { it.id.startsWith("NET-") }.take(MAX_FINDINGS)
+        val network = ordered.filter { it.first.id.startsWith("NET-") }
+        val keptFindings = ordered.filterNot { it.first.id.startsWith("NET-") }.take(MAX_FINDINGS)
         val keptNetwork = network.take(MAX_NETWORK)
 
-        appendLine(STAMP + "${r.generatedAt}|${r.meta.versionName ?: "?"}|${r.meta.versionCode}|${r.grade}")
-        appendLine(VERSION + "${r.meta.versionName} (${r.meta.versionCode})")
-        appendLine(HOSTS + r.hosts.map { scrub(it.host) }.sorted().joinToString("|"))
-        appendLine(ROUTES + r.routes.map(scrub).sorted().joinToString("|"))
-        appendLine(FINDINGS + r.findings.map { "${it.severity}|${it.id}" }.distinct().sorted().joinToString("|"))
-        appendLine(DEPS + r.framework.dartDeps.map(scrub).sorted().joinToString("|"))
+        appendLine(STAMP + "${r.generatedAt}|${flat(r.meta.versionName ?: "?")}|${r.meta.versionCode}|${r.grade}")
+        appendLine(VERSION + "${flat(r.meta.versionName ?: "null")} (${r.meta.versionCode})")
+        appendLine(HOSTS + r.hosts.map { flat(scrub(it.host)) }.sorted().joinToString("|"))
+        appendLine(ROUTES + r.routes.map { flat(scrub(it)) }.sorted().joinToString("|"))
+        appendLine(FINDINGS + r.findings.map { "${it.severity}|${flat(it.id)}" }.distinct().sorted().joinToString("|"))
+        appendLine(DEPS + r.framework.dartDeps.map { flat(scrub(it)) }.sorted().joinToString("|"))
 
-        appendLine(CMP + (listOf(CMP_VERSION) + EXTENDED_CATEGORIES.map { it.name }).joinToString("|"))
-        r.permissions.map { scrub(it.name) }.distinct().sorted().forEach { appendLine(PERM + it) }
-        r.thirdParty.map { scrub(it.service) }.distinct().sorted().forEach { appendLine(PROVIDER + it) }
+        appendLine(
+            CMP + (
+                listOf(CMP_VERSION, "pkg=${flat(r.meta.packageName)}") + EXTENDED_CATEGORIES.map { it.name }
+                ).joinToString("|"),
+        )
+        r.permissions.map { flat(scrub(it.name)) }.distinct().sorted().forEach { appendLine(PERM + it) }
+        r.thirdParty.map { flat(scrub(it.service)) }.distinct().sorted().forEach { appendLine(PROVIDER + it) }
         r.meta.nativeLibs
-            .groupBy { "${it.abi}/${it.name}" }
-            .mapValues { (_, libs) -> libs.mapNotNull { it.sha256 }.minOrNull().orEmpty() }
+            .groupBy { "${flat(it.abi)}/${flat(it.name)}" }
+            .mapValues { (_, libs) -> libs.mapNotNull { it.sha256 }.minOrNull()?.let(::flat).orEmpty() }
             .toSortedMap()
             .forEach { (name, sha) -> appendLine(NATIVE + "$name=$sha") }
-        keptFindings.forEach { appendLine(FIND + it.encode()) }
-        keptNetwork.forEach { appendLine(NET + it.encode()) }
-        r.signing.sha256Fingerprint?.let { appendLine(SIGN + it) }
-        if (findingFacts.count { !it.id.startsWith("NET-") } > keptFindings.size) {
+        keptFindings.forEach { (fact, times) -> appendLine(FIND + fact.encode(times)) }
+        keptNetwork.forEach { (fact, times) -> appendLine(NET + fact.encode(times)) }
+        r.signing.sha256Fingerprint?.let { appendLine(SIGN + flat(it)) }
+        if (ordered.count { !it.first.id.startsWith("NET-") } > keptFindings.size) {
             appendLine(CUT + DiffCategory.FINDINGS.name)
         }
         if (network.size > keptNetwork.size) appendLine(CUT + DiffCategory.NETWORK_POLICY.name)
@@ -100,12 +114,18 @@ object History {
     fun diff(old: String, new: String): List<String> {
         val a = parseFacts(old) ?: return emptyList()
         val b = parseFacts(new) ?: return emptyList()
+        // A storage-name collision (`com.a_b` vs `com.a.b`) can put another
+        // app's scan in this log; never diff two subjects.
+        val beforePackage = a.packageName
+        val afterPackage = b.packageName
+        if (beforePackage != null && afterPackage != null && beforePackage != afterPackage) {
+            return listOf("not compared: these scans belong to different packages ($beforePackage vs $afterPackage)")
+        }
         val sameFormat = (a.extended == null) == (b.extended == null)
         val oldFacts = factsOf(a)
         val newFacts = factsOf(b)
         val formatSkip = if (sameFormat) emptySet() else setOf(DiffCategory.FINDINGS, DiffCategory.NETWORK_POLICY)
         val skipped = oldFacts.unavailable + newFacts.unavailable + formatSkip
-        val unavailable = oldFacts.unavailable + newFacts.unavailable
 
         val changes = ArrayList<ReportChange>()
         a.version?.let { before ->
@@ -117,7 +137,8 @@ object History {
         val sorted = changes.sortedWith(CHANGE_ORDER)
 
         // Per-category bounds keep the inline card readable; the global bound is
-        // the same one the log always had.
+        // the same one the log always had. This list is a summary — the complete
+        // change set comes from History.changeLines(comparison).
         val out = ArrayList<String>()
         sorted.firstOrNull { it.category == DiffCategory.VERSION }?.let { out += line(it) }
         val grouped = sorted.filter { it.category != DiffCategory.VERSION }.groupBy { it.category }
@@ -128,19 +149,45 @@ object History {
         if (out.size > 40) {
             val extra = out.size - 39
             out.subList(39, out.size).clear()
-            out += "… $extra more (see JSON export)"
+            out += "… $extra more (see the complete comparison)"
+        }
+        // Two records from the original format have the same (smaller) category
+        // set, so they stay quiet; anything extended is explicit about what the
+        // pair could not answer.
+        val notes = if (a.extended == null && b.extended == null) {
+            emptyList()
+        } else {
+            notesFor(oldFacts.unavailable, newFacts.unavailable, formatSkip)
         }
         if (out.isEmpty()) {
-            out += "no change in hosts, routes, findings or dependencies"
-        }
-        // Only say this when the newer snapshot is the extended one: an old-only
-        // pair records the same (smaller) set and is simply quiet.
-        if (b.extended != null && a.extended == null) {
-            unavailable.sortedBy { it.ordinal }.forEach { category ->
-                out += "? ${plural(category)} unavailable in the older snapshot"
+            out += if (notes.isEmpty()) {
+                "no change in hosts, routes, findings or dependencies"
+            } else {
+                "no comparison in the categories recorded by both scans"
             }
         }
+        out += notes
         return out
+    }
+
+    /** One explicit `?` line per category that was skipped, worded for the side that lacks it. */
+    private fun notesFor(
+        oldMissing: Set<DiffCategory>,
+        newMissing: Set<DiffCategory>,
+        formatSkip: Set<DiffCategory>,
+    ): List<String> {
+        val notes = ArrayList<String>()
+        for (category in DiffCategory.entries) {
+            val note = when {
+                category in formatSkip -> "? ${plural(category)} not comparable across snapshot formats"
+                category in oldMissing && category in newMissing -> "? ${plural(category)} unavailable in both scans"
+                category in oldMissing -> "? ${plural(category)} unavailable in the older snapshot"
+                category in newMissing -> "? ${plural(category)} unavailable in the newer scan"
+                else -> null
+            }
+            if (note != null) notes += note
+        }
+        return notes
     }
 
     private fun line(change: ReportChange): String {
@@ -179,41 +226,87 @@ object History {
         packageName: String,
         namespace: ScanNamespace,
     ): ReportComparison? {
-        val current = entries.getOrNull(index) ?: return null
         val previousIndex = previousDifferentIndex(entries, index) ?: return null
-        val previous = entries[previousIndex]
+        return comparisonAt(entries, previousIndex, index, packageName, namespace)
+    }
+
+    /**
+     * Unbounded comparison of the retained scan at [index] with the immediately
+     * previous retained scan, whatever its version: the complete set behind the
+     * inline "changes since last scan" card and its See-all route.
+     */
+    fun comparisonForPreviousScan(
+        entries: List<ScanLogEntry>,
+        index: Int,
+        packageName: String,
+        namespace: ScanNamespace,
+    ): ReportComparison? {
+        if (index <= 0) return null
+        return comparisonAt(entries, index - 1, index, packageName, namespace)
+    }
+
+    /** Every change of a comparison as display lines, with no category or line bound. */
+    fun changeLines(comparison: ReportComparison): List<String> =
+        if (comparison.rejected) {
+            listOfNotNull(comparison.rejectedReason?.let { "? $it" })
+        } else {
+            comparison.changes.map { line(it) }
+        }
+
+    private fun comparisonAt(
+        entries: List<ScanLogEntry>,
+        previousIndex: Int,
+        index: Int,
+        packageName: String,
+        namespace: ScanNamespace,
+    ): ReportComparison? {
+        val previous = entries.getOrNull(previousIndex) ?: return null
+        val current = entries.getOrNull(index) ?: return null
         val a = parseFacts(previous.snapshot) ?: return null
         val b = parseFacts(current.snapshot) ?: return null
+        val beforeVersion = ReportIdentity(
+            packageName = a.packageName ?: packageName,
+            versionName = previous.versionName.takeIf { it != "?" },
+            versionCode = previous.versionCode,
+            namespace = namespace,
+        )
+        val afterVersion = ReportIdentity(
+            packageName = b.packageName ?: packageName,
+            versionName = current.versionName.takeIf { it != "?" },
+            versionCode = current.versionCode,
+            namespace = namespace,
+        )
+        // The history file is keyed by a lossy storage name, so a collision can
+        // put another app's block in this log. Never compare two subjects.
+        if (beforeVersion.packageName != packageName || afterVersion.packageName != packageName) {
+            val foreign = beforeVersion.packageName.takeIf { it != packageName }
+                ?: afterVersion.packageName.takeIf { it != packageName }
+                ?: afterVersion.packageName
+            return ReportComparison(
+                status = ComparisonStatus.PACKAGE_MISMATCH,
+                before = beforeVersion.copy(packageName = packageName),
+                after = afterVersion.copy(packageName = if (foreign == packageName) beforeVersion.packageName else foreign),
+            )
+        }
         val sameFormat = (a.extended == null) == (b.extended == null)
         val oldFacts = factsOf(a)
         val newFacts = factsOf(b)
         val formatSkip = if (sameFormat) emptySet() else setOf(DiffCategory.FINDINGS, DiffCategory.NETWORK_POLICY)
         val unavailable = oldFacts.unavailable + newFacts.unavailable + formatSkip
-        val before = ReportIdentity(
-            packageName = packageName,
-            versionName = previous.versionName.takeIf { it != "?" },
-            versionCode = previous.versionCode,
-            namespace = namespace,
-        )
-        val after = ReportIdentity(
-            packageName = packageName,
-            versionName = current.versionName.takeIf { it != "?" },
-            versionCode = current.versionCode,
-            namespace = namespace,
-        )
+
         val changes = ArrayList<ReportChange>()
-        if (before.versionLabel != after.versionLabel) {
+        if (beforeVersion.versionLabel != afterVersion.versionLabel) {
             changes += ReportChange(
                 DiffCategory.VERSION,
                 DiffChange.CHANGED,
-                "${before.versionLabel} → ${after.versionLabel}",
+                "${beforeVersion.versionLabel} → ${afterVersion.versionLabel}",
             )
         }
         changes += DiffEngine.compare(oldFacts, newFacts, unavailable)
         return ReportComparison(
             status = ComparisonStatus.COMPARED,
-            before = before,
-            after = after,
+            before = beforeVersion,
+            after = afterVersion,
             changes = changes.sortedWith(CHANGE_ORDER),
             unavailable = unavailable,
             coalesced = changes.sumOf { (it.occurrences - 1).coerceAtLeast(0) },
@@ -238,7 +331,11 @@ object History {
         val kind: FindingKind,
         val source: String,
     ) {
-        fun encode(): String = "$severity|$kind|$id|$source"
+        /** Identity of the fact; duplicates differ only by occurrence count. */
+        fun key(): String = "$severity|$kind|$id|$source"
+
+        /** `severity|kind|count|id|source`; the count sits before the free-text source. */
+        fun encode(occurrences: Int): String = "$severity|$kind|$occurrences|$id|$source"
     }
 
     private class Extended(
@@ -258,7 +355,12 @@ object History {
         val legacyFindings: List<String>,
         val deps: List<String>,
         val extended: Extended?,
+        /** Package recorded in the extension, when the snapshot has one. */
+        val packageName: String?,
     )
+
+    /** A value never gets to start a new snapshot line of its own. */
+    private fun flat(value: String): String = value.replace('\r', ' ').replace('\n', ' ')
 
     /**
      * Parses a snapshot. Legacy keys keep their old "last line wins" behaviour;
@@ -272,6 +374,7 @@ object History {
         var deps = emptyList<String>()
         var recognized = false
         var hasExtension = false
+        var recordedPackage: String? = null
         val available = HashSet<DiffCategory>()
         val cut = HashSet<DiffCategory>()
         val permissions = ArrayList<String>()
@@ -308,7 +411,11 @@ object History {
                 line.startsWith(CMP) -> {
                     hasExtension = true
                     line.removePrefix(CMP).split('|').drop(1).forEach { token ->
-                        DiffCategory.entries.firstOrNull { it.name == token }?.let { available += it }
+                        if (token.startsWith(PKG_ATTR)) {
+                            recordedPackage = token.removePrefix(PKG_ATTR).trim().ifBlank { null }
+                        } else {
+                            DiffCategory.entries.firstOrNull { it.name == token }?.let { available += it }
+                        }
                     }
                     recognized = true
                 }
@@ -358,7 +465,7 @@ object History {
             network = network,
             signing = signing,
         )
-        return Snapshot(version, hosts, routes, legacyFindings, deps, extended)
+        return Snapshot(version, hosts, routes, legacyFindings, deps, extended, recordedPackage)
     }
 
     private fun columns(body: String): List<String> =
@@ -372,14 +479,29 @@ object History {
         return if (items.size % 2 == 0) items.chunked(2).map { it.joinToString("|") } else items
     }
 
+    /**
+     * `severity|kind|count|id|source` for snapshots written by this build, and
+     * the older `severity|kind|id|source` shape. The count is recognised by
+     * position, so a source containing `|` still round-trips.
+     */
     private fun decodeFinding(body: String): Pair<String, DiffFact>? {
-        val parts = body.split('|', limit = 4)
+        val parts = body.split('|', limit = 5)
         if (parts.size < 4) return null
         val severity = runCatching { Severity.valueOf(parts[0]) }.getOrNull() ?: return null
         val kind = FindingKind.parse(parts[1]) ?: FindingKind.SUSPECTED
-        val id = parts[2].ifBlank { return null }
-        val source = parts[3].ifBlank { "artifact" }
-        return "${id} @ $source" to DiffFact(severity = severity, kind = kind)
+        val count = parts[2].toIntOrNull()
+        val id: String
+        val source: String
+        if (count != null && parts.size == 5) {
+            id = parts[3]
+            source = parts[4]
+        } else {
+            id = parts[2]
+            source = parts.drop(3).joinToString("|")
+        }
+        if (id.isBlank()) return null
+        return "${id} @ ${source.ifBlank { "artifact" }}" to
+            DiffFact(severity = severity, kind = kind, occurrences = (count ?: 1).coerceAtLeast(1))
     }
 
     private fun mergeFact(a: DiffFact, b: DiffFact): DiffFact = a.copy(occurrences = a.occurrences + b.occurrences)

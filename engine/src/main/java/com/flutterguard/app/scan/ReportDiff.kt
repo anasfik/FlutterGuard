@@ -292,7 +292,7 @@ object ReportDiff {
             val isNetwork = finding.id.startsWith("NET-")
             if (isNetwork != networkOnly) continue
             val sources = finding.evidence
-                .map { scrub(it.source.ifBlank { "artifact" }) }
+                .map { flatten(scrub(it.source.ifBlank { "artifact" })) }
                 .ifEmpty { listOf("artifact") }
             for (source in sources) {
                 val key = "${finding.id} @ $source"
@@ -306,4 +306,7 @@ object ReportDiff {
         }
         return out.toSortedMap()
     }
+
+    /** One identity never spans two lines, whatever the artifact string contained. */
+    private fun flatten(value: String): String = value.replace('\r', ' ').replace('\n', ' ')
 }

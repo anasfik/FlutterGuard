@@ -238,7 +238,7 @@ class ReportDiffTest {
     @Test
     fun missingHistoricalCategoriesAreUnavailableNeverRemovals() {
         // A snapshot written before the extended categories existed.
-        val legacy = "version:1.0.0 (1)\nhosts:a.example\nroutes:\nfindings:\ndeps:"
+        val legacy = "version:1.0.0 (1)\nhosts:a.example\nroutes:\nfindings:MEDIUM|SEC-KEY-GENERIC\ndeps:"
         val current = DiffFixture.report(
             versionName = "2.0.0",
             versionCode = 2,
@@ -246,7 +246,11 @@ class ReportDiffTest {
             permissions = listOf("android.permission.CAMERA"),
             providers = listOf("Firebase"),
             nativeLibs = listOf(DiffFixture.lib("libapp.so", "arm64-v8a", "abc")),
-            findings = listOf(DiffFixture.finding("NET-CLEARTEXT", Severity.MEDIUM)),
+            findings = listOf(
+                // A non-NET finding proves FINDINGS itself is refused, not just NETWORK_POLICY.
+                DiffFixture.finding("SEC-KEY-GENERIC", Severity.MEDIUM),
+                DiffFixture.finding("NET-CLEARTEXT", Severity.MEDIUM),
+            ),
             signingSha256 = "AA:BB",
         )
         val log = ScanLog.append(ScanLog.append(null, legacy), History.snapshot(current))
@@ -263,6 +267,7 @@ class ReportDiffTest {
                     DiffCategory.PERMISSIONS,
                     DiffCategory.PROVIDERS,
                     DiffCategory.NATIVE_LIBS,
+                    DiffCategory.FINDINGS,
                     DiffCategory.NETWORK_POLICY,
                     DiffCategory.SIGNING,
                 ),
@@ -275,6 +280,7 @@ class ReportDiffTest {
                     DiffCategory.PERMISSIONS,
                     DiffCategory.PROVIDERS,
                     DiffCategory.NATIVE_LIBS,
+                    DiffCategory.FINDINGS,
                     DiffCategory.NETWORK_POLICY,
                     DiffCategory.SIGNING,
                 )
@@ -287,6 +293,117 @@ class ReportDiffTest {
         assertTrue("unexpected native removal in $lines", lines.none { it.startsWith("- native") })
         assertTrue("no explicit unavailable note in $lines", lines.any { it.startsWith("?") && it.contains("native") })
         assertTrue(lines.none { it.startsWith("+ network") || it.startsWith("- network") })
+        assertTrue("finding removal leaked: $lines", lines.none { it.startsWith("+ finding") || it.startsWith("- finding") })
+    }
+
+    @Test
+    fun aLegacyPairDiffNeverClaimsFindingEquality() {
+        // Findings exist on both sides but the identity formats differ, so the
+        // List<String> path must say "unavailable", never "no change in findings".
+        val legacy = "version:1.0.0 (1)\nhosts:\nroutes:\nfindings:MEDIUM|SEC-KEY-GENERIC\ndeps:"
+        val current = DiffFixture.report(
+            versionName = "2.0.0",
+            versionCode = 2,
+            findings = listOf(DiffFixture.finding("SEC-KEY-GENERIC", Severity.MEDIUM)),
+        )
+        val lines = History.diff(legacy, History.snapshot(current))
+        assertTrue(lines.toString(), lines.any { it.startsWith("?") && it.contains("findings") })
+        assertTrue(lines.toString(), lines.none { it.startsWith("+ finding") || it.startsWith("- finding") })
+        assertTrue(
+            lines.toString(),
+            lines.none { it.startsWith("no change in hosts, routes, findings or dependencies") },
+        )
+    }
+
+    @Test
+    fun aTruncatedFindingBlockIsUnavailableNotAPartialBaseline() {
+        val sources = (1..301).map { "s$it.dex" }
+        val before = DiffFixture.report(
+            versionName = "1.0.0",
+            versionCode = 1,
+            findings = listOf(DiffFixture.finding("SEC-KEY-GENERIC", sources = listOf("s1.dex"))),
+        )
+        val after = DiffFixture.report(
+            versionName = "2.0.0",
+            versionCode = 2,
+            findings = listOf(DiffFixture.finding("SEC-KEY-GENERIC", sources = sources)),
+        )
+        val log = ScanLog.append(ScanLog.append(null, History.snapshot(before)), History.snapshot(after))
+        val entries = ScanLog.decode(log)
+        assertTrue(entries[1].snapshot, entries[1].snapshot.contains("cut:FINDINGS"))
+        val comparison = History.comparison(entries, 1, "com.example.app", ScanNamespace.INSTALLED)!!
+        assertTrue(comparison.unavailable.contains(DiffCategory.FINDINGS))
+        assertTrue(comparison.changes.none { it.category == DiffCategory.FINDINGS })
+    }
+
+    @Test
+    fun snapshotValuesCannotForgeAnotherSnapshotLine() {
+        val nasty = DiffFixture.report(
+            findings = listOf(
+                DiffFixture.finding(
+                    "SEC-KEY-GENERIC",
+                    sources = listOf("libapp.so\nversion:9 (9)\nsign:FF"),
+                ),
+            ),
+        )
+        val snapshot = History.snapshot(nasty)
+        assertTrue(snapshot, snapshot.lineSequence().none { it.startsWith("version:9") })
+        assertTrue(snapshot, snapshot.lineSequence().none { it.startsWith("sign:FF") })
+        val entries = ScanLog.decode(ScanLog.append(null, snapshot))
+        assertEquals("1.0.0", entries.single().versionName)
+        assertEquals(1L, entries.single().versionCode)
+        val next = History.snapshot(DiffFixture.report(versionName = "2.0.0", versionCode = 2))
+        val lines = History.diff(entries.single().snapshot, next)
+        assertTrue(
+            lines.toString(),
+            lines.none { it.startsWith("version:9") || it.startsWith("~ version 9") },
+        )
+        assertTrue(lines.toString(), lines.any { it.startsWith("~ version 1.0.0 (1) → 2.0.0 (2)") })
+    }
+
+    @Test
+    fun duplicateOccurrencesSurviveTheHistorySnapshot() {
+        val before = DiffFixture.report()
+        val after = DiffFixture.report(
+            versionName = "1.0.1",
+            versionCode = 2,
+            findings = listOf(
+                DiffFixture.finding("SEC-KEY-GENERIC", sources = listOf("classes.dex", "classes.dex", "classes.dex")),
+            ),
+        )
+        val log = ScanLog.append(ScanLog.append(null, History.snapshot(before)), History.snapshot(after))
+        val comparison = History.comparison(ScanLog.decode(log), 1, "com.example.app", ScanNamespace.INSTALLED)!!
+        val change = comparison.changes.single { it.category == DiffCategory.FINDINGS }
+        assertEquals(3, change.occurrences)
+        assertEquals(2, comparison.coalesced)
+    }
+
+    @Test
+    fun aHistoryLogFromAnotherPackageIsRejected() {
+        val foreign = DiffFixture.report(packageName = "com.other.app", versionName = "1.0.0", versionCode = 1)
+        val mine = DiffFixture.report(packageName = "com.example.app", versionName = "2.0.0", versionCode = 2)
+        val log = ScanLog.append(ScanLog.append(null, History.snapshot(foreign)), History.snapshot(mine))
+        val comparison = History.comparison(ScanLog.decode(log), 1, "com.example.app", ScanNamespace.INSTALLED)!!
+        assertEquals(ComparisonStatus.PACKAGE_MISMATCH, comparison.status)
+        assertTrue(comparison.changes.isEmpty())
+        val reason = comparison.rejectedReason.orEmpty()
+        assertTrue(reason, reason.contains("com.other.app"))
+        assertTrue(reason, reason.contains("com.example.app"))
+    }
+
+    @Test
+    fun comparisonLinesAreCompleteWhileTheHistorySummaryIsBounded() {
+        val added = (1..50).map { "h$it.example" }
+        val before = DiffFixture.report(hosts = listOf("a.example"))
+        val after = DiffFixture.report(versionName = "1.1.0", versionCode = 2, hosts = listOf("a.example") + added)
+        val log = ScanLog.append(ScanLog.append(null, History.snapshot(before)), History.snapshot(after))
+        val entries = ScanLog.decode(log)
+
+        val comparison = History.comparisonForPreviousScan(entries, 1, "com.example.app", ScanNamespace.INSTALLED)!!
+        val lines = History.changeLines(comparison)
+        assertEquals(51, lines.size) // 1 version row + 50 host additions
+        assertEquals(50, lines.count { it.startsWith("+ host") })
+        assertTrue(History.diff(entries[0].snapshot, entries[1].snapshot).size <= 40)
     }
 
     @Test
