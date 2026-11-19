@@ -202,9 +202,15 @@ data class ExportChoice(
     val json: Boolean = true,
     val sections: Set<ReportSection> = ReportExport.allSections,
     val sensitive: Boolean = false,
+    /**
+     * Write the comparison with the previous recorded version instead of the
+     * report sections. A comparison document can never include raw values, so
+     * it is independent of [sensitive] and of the section ticks.
+     */
+    val comparison: Boolean = false,
 ) {
     val extension: String get() = if (json) "json" else "md"
-    val canExport: Boolean get() = sections.isNotEmpty()
+    val canExport: Boolean get() = comparison || sections.isNotEmpty()
 
     fun toggled(section: ReportSection): ExportChoice =
         copy(sections = if (section in sections) sections - section else sections + section)
@@ -212,12 +218,14 @@ data class ExportChoice(
 
 /**
  * Export selection as plain strings, so rotating the device mid-selection keeps
- * the ticks and the sensitive opt-in instead of silently resetting them.
+ * the ticks, the sensitive opt-in and the comparison choice instead of
+ * silently resetting them.
  */
 fun ExportChoice.encode(): List<String> = listOf(
     json.toString(),
     sensitive.toString(),
     sections.joinToString(",") { it.name },
+    comparison.toString(),
 )
 
 /**
@@ -235,6 +243,7 @@ fun exportChoiceOf(saved: List<String>): ExportChoice {
         json = saved.getOrNull(0)?.toBooleanStrictOrNull() ?: true,
         sections = sections,
         sensitive = saved.getOrNull(1)?.toBooleanStrictOrNull() == true,
+        comparison = saved.getOrNull(3)?.toBooleanStrictOrNull() == true,
     )
 }
 

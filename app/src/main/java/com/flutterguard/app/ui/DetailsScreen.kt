@@ -78,6 +78,7 @@ import com.flutterguard.app.scan.DeepLink
 import com.flutterguard.app.scan.Evidence
 import com.flutterguard.app.scan.Finding
 import com.flutterguard.app.scan.FindingKind
+import com.flutterguard.app.scan.History
 import com.flutterguard.app.scan.InstalledApp
 import com.flutterguard.app.scan.PubPackage
 import com.flutterguard.app.scan.Report
@@ -86,6 +87,7 @@ import com.flutterguard.app.scan.ReportFiles
 import com.flutterguard.app.scan.ReportSection
 import com.flutterguard.app.scan.RouteTree
 import com.flutterguard.app.scan.ScanLog
+import com.flutterguard.app.scan.ScanNamespace
 import com.flutterguard.app.scan.StoredReport
 import com.flutterguard.app.scan.ScanLogEntry
 import com.flutterguard.app.scan.ScanPhase
@@ -345,7 +347,16 @@ private fun OverviewSection(
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         item { GradeCard(report) }
-        if (diff.isNotEmpty()) item { DiffCard(diff) }
+        if (diff.isNotEmpty()) {
+            item {
+                DiffCard(
+                    diff = diff,
+                    onSeeAll = if (diff.size > DIFF_PREVIEW) {
+                        { onSeeAll(SeeAllTarget.DIFF, "") }
+                    } else null,
+                )
+            }
+        }
         item {
             SectionCard("APK artifact") {
                 InfoLine("Version", apkVersion(report))
@@ -631,9 +642,10 @@ private fun StatLine(label: String, count: Int, severity: com.flutterguard.app.s
 }
 
 @Composable
-private fun DiffCard(diff: List<String>) {
+private fun DiffCard(diff: List<String>, onSeeAll: (() -> Unit)?) {
+    val window = preview(diff, DIFF_PREVIEW)
     SectionCard("Changes since last scan") {
-        diff.forEach { line ->
+        window.visible.forEach { line ->
             Text(
                 line,
                 style = MaterialTheme.typography.bodySmall,
@@ -641,6 +653,7 @@ private fun DiffCard(diff: List<String>) {
                 color = themeDiffColor(line),
             )
         }
+        SectionFooter(window.countLabel("changes"), onSeeAll)
     }
 }
 
@@ -1533,6 +1546,14 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
     var exporting by remember { mutableStateOf(false) }
     var exportJob by remember { mutableStateOf<Job?>(null) }
 
+    // The comparison is rebuilt from the retained log, so opening this dialog
+    // never scans and a first scan simply has nothing to compare.
+    val log = rememberScanLog(report.meta.packageName, report.generatedAt, report.meta.fileScan)
+    val namespace = if (report.meta.fileScan) ScanNamespace.FILE else ScanNamespace.INSTALLED
+    val comparison = remember(log, report) {
+        History.comparison(log, log.lastIndex, report.meta.packageName, namespace)
+    }
+
     AlertDialog(
         // Back (and a tap outside) closes this dialog first — it never leaves the
         // screen — and a running export is cancelled rather than left orphaned.
@@ -1576,6 +1597,28 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                 }
                 Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
+                        Text("Comparison with previous version", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (comparison == null) {
+                                "Not available: this is the first recorded scan of this app, so there is nothing to compare yet."
+                            } else {
+                                "Writes one ${if (choice.json) "JSON" else "Markdown"} document of what changed " +
+                                    "between ${comparison.before.versionLabel} and ${comparison.after.versionLabel} " +
+                                    "instead of the report sections."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = choice.comparison && comparison != null,
+                        enabled = comparison != null,
+                        onCheckedChange = { on -> if (comparison != null) choice = choice.copy(comparison = on) },
+                        modifier = Modifier.semantics { contentDescription = "Comparison export" },
+                    )
+                }
+                Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
                         Text("Sensitive export", style = MaterialTheme.typography.titleSmall)
                         Text(
                             if (sensitiveAllowed) {
@@ -1589,7 +1632,7 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                     }
                     Switch(
                         checked = choice.sensitive && sensitiveAllowed,
-                        enabled = sensitiveAllowed,
+                        enabled = sensitiveAllowed && !choice.comparison,
                         onCheckedChange = { on ->
                             if (sensitiveAllowed) {
                                 if (on) confirmSensitive = true else choice = choice.copy(sensitive = false)
@@ -1599,7 +1642,8 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                     )
                 }
                 Text(
-                    "Limits: artifacts are a bounded subset (max 256); selected sections with no data are omitted; history snapshots never include values.",
+                    "Limits: artifacts are a bounded subset (max 256); selected sections with no data are omitted; history snapshots never include values. " +
+                        "A comparison carries rule identity, source provenance, severity and kind only.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1613,9 +1657,13 @@ private fun ExportDialog(report: Report, onDismiss: () -> Unit) {
                     val sections = choice.sections
                     val ext = choice.extension
                     val sensitive = settings.exportSensitive(choice.sensitive)
+                    val cmp = if (choice.comparison) comparison else null
                     exportJob = scope.launch {
                         val result = withContext(Dispatchers.IO) {
-                            runCatching { ReportExport.writeFile(context.cacheDir, report, ext, sections, sensitive) }
+                            runCatching {
+                                if (cmp != null) ReportExport.writeComparisonFile(context.cacheDir, cmp, ext)
+                                else ReportExport.writeFile(context.cacheDir, report, ext, sections, sensitive)
+                            }
                         }
                         result.onSuccess { file -> shareReportFile(context, file, ext) }
                             .onFailure {

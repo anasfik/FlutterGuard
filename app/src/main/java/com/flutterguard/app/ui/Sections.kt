@@ -59,6 +59,12 @@ import kotlinx.coroutines.withContext
 /** Inline preview size for every long section. */
 const val PREVIEW_ROWS = 8
 
+/**
+ * Inline preview of the change list. The full comparison may hold dozens of
+ * rows; the detail scroll gets a handful and an explicit See-all route.
+ */
+const val DIFF_PREVIEW = 4
+
 /** Hard bound of one See-all route: virtualized, but never unbounded. */
 const val SEE_ALL_MAX = 500
 
@@ -214,7 +220,12 @@ internal fun SectionRoute(
         val deps = remember(report.framework.dartDeps, destination.filter) {
             filterDependencies(report.framework.dartDeps, destination.filter)
         }
-        val rows = remember(destination.target, report, groups, filteredArtifacts, secrets, log, hosts, deps) {
+        // Same change set the inline card previewed: newest retained scan against
+        // the scan before it, not against another version.
+        val latestDiff = remember(log) {
+            if (log.isEmpty()) emptyList() else ScanLog.diffForPreviousScan(log, log.lastIndex)
+        }
+        val rows = remember(destination.target, report, groups, filteredArtifacts, secrets, log, hosts, deps, latestDiff) {
             SeeAllRows.of(
                 target = destination.target,
                 report = report,
@@ -224,6 +235,7 @@ internal fun SectionRoute(
                 log = log,
                 hosts = hosts,
                 deps = deps,
+                diff = latestDiff,
             )
         }
 
@@ -280,6 +292,7 @@ enum class SeeAllTarget(val title: String, val noun: String, val searchable: Boo
     PERMISSIONS("Permissions", "permissions", false),
     DEEP_LINKS("Deep links", "links", false),
     SCAN_LOG("Scan log", "scans", false),
+    DIFF("Report changes", "changes", false),
 }
 
 /**
@@ -316,6 +329,7 @@ object SeeAllRows {
         log: List<ScanLogEntry> = emptyList(),
         hosts: List<HostInfo>? = null,
         deps: List<String>? = null,
+        diff: List<String>? = null,
     ): List<SeeAllRowData> = when (target) {
         SeeAllTarget.HOSTS -> Endpoints.rows(hosts ?: report.hosts.filter { it.classification != "unclassified" })
             .map { endpoint ->
@@ -370,7 +384,19 @@ object SeeAllRows {
                 detail = ScanLog.diffForPreviousVersion(log, index).joinToString("\n").ifBlank { null },
             )
         }.asReversed()
+        SeeAllTarget.DIFF -> (diff ?: emptyList()).map { line ->
+            SeeAllRowData(title = line, meta = diffRowMeta(line))
+        }
     }
+}
+
+/** One-line description of a change prefix; the line itself stays the row. */
+private fun diffRowMeta(line: String): String = when (line.firstOrNull()) {
+    '+' -> "added"
+    '-' -> "removed"
+    '~' -> "changed"
+    '?' -> "unavailable"
+    else -> "context"
 }
 
 fun filterSeeAllRows(rows: List<SeeAllRowData>, query: String): List<SeeAllRowData> =

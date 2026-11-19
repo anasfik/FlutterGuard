@@ -136,6 +136,12 @@ class DesignContractTest {
         // A save we cannot read must never silently enable a sensitive or full export.
         assertEquals(ExportChoice(), exportChoiceOf(emptyList()))
         assertFalse(exportChoiceOf(listOf("true", "false", "NOT_A_SECTION")).canExport)
+
+        // A comparison-only export is a real state: no sections, one document.
+        val comparison = ExportChoice(sections = emptySet(), comparison = true)
+        assertTrue(comparison.canExport)
+        assertEquals(comparison, exportChoiceOf(comparison.encode()))
+        assertFalse(exportChoiceOf(comparison.copy(comparison = false).encode()).canExport)
     }
 
     // ---------------------------------------------------------------- D4

@@ -124,4 +124,30 @@ class SectionsTest {
         assertNull(rows.first { it.title.contains("localhost") }.link)
         assertNotNull(rows.first { it.title.contains("appflowy.io") }.link)
     }
+
+    @Test
+    fun changePreviewIsBoundedAndCounted() {
+        val lines = (1..30).map { "+ host h$it.example" }
+        val window = preview(lines, DIFF_PREVIEW)
+        assertEquals(DIFF_PREVIEW, window.visible.size)
+        assertEquals(30, window.total)
+        assertTrue(window.isCapped)
+        assertEquals("Showing $DIFF_PREVIEW of 30 changes", window.countLabel("changes"))
+        assertEquals("3 changes", preview(lines.take(3), DIFF_PREVIEW).countLabel("changes"))
+    }
+
+    @Test
+    fun seeAllChangeRouteRendersEverySortedLine() {
+        val lines = listOf("~ version 1 (1) → 2 (2)", "+ host new.example", "- host old.example", "? permissions unavailable")
+        val rows = SeeAllRows.of(
+            SeeAllTarget.DIFF,
+            report(),
+            RecoveredPathGroups(),
+            artifacts = null,
+            secrets = emptyList(),
+            diff = lines,
+        )
+        assertEquals(lines, rows.map { it.title })
+        assertEquals(listOf("changed", "added", "removed", "unavailable"), rows.map { it.meta })
+    }
 }

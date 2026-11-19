@@ -105,7 +105,7 @@ class HistoryLogTest {
     }
 
     @Test
-    fun diffIsComputedAgainstThePreviousEntryOfTheSameVersion() {
+    fun diffIsComputedAgainstThePreviousDifferentVersion() {
         val sameVersion = report("1.0.0", 1, 'B', generatedAt = 1_700_000_200_000, hosts = listOf("a.example", "c.example"))
         val log = ScanLog.append(
             ScanLog.append(ScanLog.append(null, History.snapshot(first)), History.snapshot(second)),
@@ -113,9 +113,40 @@ class HistoryLogTest {
         )
         val entries = ScanLog.decode(log)
 
-        assertTrue(ScanLog.diffForPreviousVersion(entries, 1).isEmpty())
-        assertEquals(listOf("+ host c.example"), ScanLog.diffForPreviousVersion(entries, 2))
+        // Entry 1 reaches back past nothing into 1.0.0, not into its own version.
+        assertEquals(
+            listOf("~ version 1.0.0 (1) → 1.1.0 (2)", "+ host b.example"),
+            ScanLog.diffForPreviousVersion(entries, 1),
+        )
+        // Entry 2 (a 1.0.0 rescan) is compared with 1.1.0, not with the older 1.0.0:
+        // the same-version rescan one row earlier was a same-version scan, not a version.
+        assertEquals(
+            listOf("~ version 1.1.0 (2) → 1.0.0 (1)", "+ host c.example", "- host b.example"),
+            ScanLog.diffForPreviousVersion(entries, 2),
+        )
         assertTrue(ScanLog.diffForPreviousVersion(entries, 0).isEmpty())
+    }
+
+    @Test
+    fun aSameVersionRescanShowsArtifactsButNeverClaimsAVersionChange() {
+        val rescan = report("1.1.0", 2, 'C', generatedAt = 1_700_000_300_000, hosts = listOf("a.example", "b.example", "d.example"))
+        val log = ScanLog.append(
+            ScanLog.append(null, History.snapshot(first)),
+            History.snapshot(second),
+        )
+        val rescanned = ScanLog.append(log, History.snapshot(rescan))
+        val entries = ScanLog.decode(rescanned)
+
+        // Newest vs previous scan: the artifact delta is visible.
+        val perScan = ScanLog.diffForPreviousScan(entries, 2)
+        assertEquals(listOf("+ host d.example"), perScan)
+        assertTrue("a same-version rescan must not claim a version change: $perScan", perScan.none { it.startsWith("~ version") })
+
+        // Per-version log row still reaches the previous genuinely different version.
+        assertEquals(
+            listOf("~ version 1.0.0 (1) → 1.1.0 (2)", "+ host b.example", "+ host d.example"),
+            ScanLog.diffForPreviousVersion(entries, 2),
+        )
     }
 
     @Test

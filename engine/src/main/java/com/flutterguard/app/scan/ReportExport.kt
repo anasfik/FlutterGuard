@@ -336,4 +336,100 @@ object ReportExport {
         f.writeText(render(r, ext, sections, sensitive))
         return f
     }
+
+    // ------------------------------------------------------------ comparison
+
+    const val COMPARISON_SCHEMA = "flutterguard/comparison/1"
+
+    /**
+     * The exact tree [comparisonJson] serializes. A comparison only ever holds
+     * safe display strings, so there is no sensitive variant and no secret set
+     * to scrub here: identity, provenance, severity and kind are all it knows.
+     */
+    fun comparisonPayload(c: ReportComparison): Map<String, Any?> = linkedMapOf(
+        "schema" to COMPARISON_SCHEMA,
+        "status" to c.status.name,
+        "packageName" to c.before.packageName,
+        "namespace" to c.before.namespace.name,
+        "rejectedReason" to c.rejectedReason,
+        "before" to identityPayload(c.before),
+        "after" to identityPayload(c.after),
+        "versionChanged" to c.versionChanged,
+        "unavailable" to c.unavailable.sortedBy { it.ordinal }.map { it.name },
+        "coalesced" to c.coalesced,
+        "counts" to linkedMapOf("added" to c.added, "removed" to c.removed, "changed" to c.modified),
+        "changes" to c.changes.map { change ->
+            linkedMapOf(
+                "category" to change.category.name,
+                "change" to change.change.name,
+                "identity" to change.identity,
+                "detail" to change.detail,
+                "occurrences" to change.occurrences,
+            )
+        },
+    )
+
+    private fun identityPayload(identity: ReportIdentity): Map<String, Any?> = linkedMapOf(
+        "packageName" to identity.packageName,
+        "versionName" to identity.versionName,
+        "versionCode" to identity.versionCode,
+        "namespace" to identity.namespace.name,
+        "versionLabel" to identity.versionLabel,
+    )
+
+    fun comparisonJson(c: ReportComparison): String =
+        (toJsonValue(comparisonPayload(c)) as JSONObject).toString(2)
+
+    fun comparisonMarkdown(c: ReportComparison): String = buildString {
+        appendLine("# FlutterGuard comparison — `${c.before.packageName}`")
+        appendLine()
+        appendLine(
+            "_Artifact evidence only: rule identity, source provenance, severity and kind. " +
+                "A candidate string stays a candidate; nothing here proves exploitability._",
+        )
+        appendLine()
+        if (c.rejected) {
+            appendLine("**${c.rejectedReason.orEmpty()}**")
+            return@buildString
+        }
+        appendLine("- Before: ${c.before.versionLabel} · ${c.before.namespace.name.lowercase()}")
+        appendLine("- After: ${c.after.versionLabel} · ${c.after.namespace.name.lowercase()}")
+        appendLine("- Version changed: ${if (c.versionChanged) "yes" else "no (same-version rescan or report)"}")
+        appendLine("- ${c.added} added, ${c.removed} removed, ${c.modified} changed · ${c.coalesced} coalesced duplicate occurrence(s)")
+        if (c.unavailable.isNotEmpty()) {
+            appendLine()
+            appendLine("## Not compared (not recorded by the older scan)")
+            c.unavailable.sortedBy { it.ordinal }.forEach { appendLine("- ${it.name.lowercase().replace('_', ' ')}") }
+        }
+        appendLine()
+        appendLine("## Changes (${c.changes.size})")
+        if (c.changes.isEmpty()) {
+            appendLine("_No recorded difference._")
+            return@buildString
+        }
+        c.changes.forEach { change ->
+            val mark = when (change.change) {
+                DiffChange.ADDED -> "+"
+                DiffChange.REMOVED -> "-"
+                DiffChange.CHANGED -> "~"
+            }
+            val detail = change.detail?.let { " — $it" }.orEmpty()
+            val times = if (change.occurrences > 1) " ×${change.occurrences}" else ""
+            appendLine("- `$mark` **${change.category.name}** `${change.identity}`$detail$times")
+        }
+    }
+
+    fun renderComparison(c: ReportComparison, ext: String): String = when (ext.lowercase()) {
+        "json" -> comparisonJson(c)
+        "md", "markdown" -> comparisonMarkdown(c)
+        else -> throw IllegalArgumentException("unsupported export format: $ext")
+    }
+
+    fun writeComparisonFile(cacheDir: File, c: ReportComparison, ext: String): File {
+        val dir = File(cacheDir, "exports").apply { mkdirs() }
+        val prefix = "${c.before.packageName.replace('.', '_')}_comparison_"
+        val f = File.createTempFile(prefix, ".$ext", dir)
+        f.writeText(renderComparison(c, ext))
+        return f
+    }
 }
