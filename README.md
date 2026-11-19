@@ -14,9 +14,13 @@ strings. The whole audit runs on your phone: no uploads, no account, no setup.
 [![Platform](https://img.shields.io/badge/android-8.0%2B-3ddc84.svg)](#install)
 [![Offline](https://img.shields.io/badge/network-no%20INTERNET%20permission-success.svg)](#privacy)
 
-**[Download the APK](https://github.com/anasfik/FlutterGuard/releases/latest) ·
-[Google Play](https://play.google.com/store/apps/details?id=com.flutterguard.app) ·
+**[Get it on Google Play](https://play.google.com/store/apps/details?id=com.flutterguard.app) ·
+[Download the APK](https://github.com/anasfik/FlutterGuard/releases/latest) ·
 [Website](https://flutterguard.dev) ·
+[Guides](https://flutterguard.dev/#guides) ·
+[Checklist](https://flutterguard.dev/flutter-security-checklist/) ·
+[Corpus](https://flutterguard.dev/flutter-release-corpus/) ·
+[Changelog](https://flutterguard.dev/changelog/) ·
 [Privacy](https://gwhyyy.com/privacy/flutterguard)**
 
 <img src="docs/play/feature-1024x500.png" width="800" alt="FlutterGuard — inspect a Flutter app and keep the evidence, offline, on your phone">

@@ -257,3 +257,10 @@ Requires Human Approval:
 ```
 
 If no issue is found in a category, write `None found from available evidence.` Do not print full secrets. Redact secret values and report the path, type, and risk.
+
+## References
+
+- [Release security checklist](https://flutterguard.dev/flutter-security-checklist/): the checks to run against any release, grouped by artifact identity, manifest policy, exposed data, dependencies, endpoints, signing and reporting.
+- [Measured release corpus](https://flutterguard.dev/flutter-release-corpus/): what 26 public Flutter release APKs exposed under static inspection, with the method and its limits.
+- [Changelog](https://flutterguard.dev/changelog/): app releases, with scan-behaviour changes called out separately from cosmetic ones.
+- [Guides](https://flutterguard.dev/#guides): the longer explanations behind the individual checks.

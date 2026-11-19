@@ -245,3 +245,9 @@ Known limit of the on-device path: it can read artifacts and strings but cannot
 decompile the Android wrapper or Dart AOT code. Anything that needs `jadx`,
 `apksigner` verification, `bundletool`, or Blutter/reFlutter stays a manual step,
 which is why `skill/SKILL.md` remains the primary workflow.
+
+The public write-up of the same corpus is
+[flutterguard.dev/flutter-release-corpus](https://flutterguard.dev/flutter-release-corpus/),
+which reports the aggregate counts without app-shaming; the audit order that follows
+from those findings is the
+[release security checklist](https://flutterguard.dev/flutter-security-checklist/).
