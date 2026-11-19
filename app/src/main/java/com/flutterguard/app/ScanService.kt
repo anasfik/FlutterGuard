@@ -220,7 +220,7 @@ class ScanService : Service() {
             savedOk = true
             if (token.isAbandoned) return
             val diff = previous?.let {
-                runCatching { History.diff(it, History.snapshot(report)) }.getOrDefault(emptyList())
+                runCatching { History.diffAgainstLatestIn(it, History.snapshot(report)) }.getOrDefault(emptyList())
             } ?: emptyList()
             ScanStore.succeeded(job.id, report, saved.json.absolutePath, saved.historyNote, diff)
             if (headless) Log.i(TAG, "FG_REPORT ${saved.json.absolutePath}")

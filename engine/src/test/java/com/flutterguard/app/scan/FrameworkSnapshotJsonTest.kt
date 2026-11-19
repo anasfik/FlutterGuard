@@ -44,6 +44,28 @@ class FrameworkSnapshotJsonTest {
     }
 
     @Test
+    fun anUnknownOrNumericSnapshotKindDecodesAsUnknown() {
+        fun json(kind: String) = """
+            {
+              "schema": "flutterguard/report/2",
+              "meta": {"packageName": "com.example.app", "versionCode": 1},
+              "framework": {"isFlutter": true, "snapshotKind": $kind},
+              "stats": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+              "findings": []
+            }
+        """.trimIndent()
+
+        // A hand-edited number, a numeric string and an unknown label are not
+        // kinds: the card must say unknown instead of rendering the raw value.
+        for (raw in listOf("3", "\"3\"", "\"full-aot\"", "\"unknown\"")) {
+            val decoded = ReportJson.decode(json(raw))
+            assertNotNull("$raw must still decode as a report", decoded)
+            assertNull("$raw is not a SnapshotKind label", decoded!!.framework.snapshotKind)
+        }
+        assertEquals("full-AOT", ReportJson.decode(json("\"full-AOT\""))!!.framework.snapshotKind)
+    }
+
+    @Test
     fun absentSnapshotFieldsAreOmittedAndDecodeAsUnknown() {
         val json = ReportExport.toJson(report(FrameworkInfo(isFlutter = true)))
         assertFalse("no kind key for an unread snapshot", json.contains("snapshotKind"))

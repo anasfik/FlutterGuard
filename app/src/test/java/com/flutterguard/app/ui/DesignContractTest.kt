@@ -68,8 +68,8 @@ class DesignContractTest {
 
     @Test
     fun theGradeLetterCarriesAVisibleMeaning() {
-        assertEquals("critical findings present", gradeLegend('F', hasCritical = true))
-        assertTrue(gradeLegend('A').startsWith("no critical"))
+        assertEquals("critical findings present", gradeLegend('F', confirmedCritical = true))
+        assertTrue(gradeLegend('A').startsWith("no confirmed critical"))
         assertNotEquals("an A and an F must never read the same", gradeLegend('A'), gradeLegend('F'))
         for (grade in listOf('A', 'B', 'C', 'D', 'F')) {
             assertNotEquals("$grade needs a legend", ReportMetadata.UNAVAILABLE, gradeLegend(grade))
@@ -82,10 +82,23 @@ class DesignContractTest {
     fun anFWithoutCriticalFindingsDoesNotClaimCriticalOnes() {
         val weightedOnly = gradeOf(c = 0, h = 2, m = 10, l = 13)
         assertEquals("that fixture must be an F without a Critical", 'F', weightedOnly)
-        val legend = gradeLegend(weightedOnly, hasCritical = false)
+        val legend = gradeLegend(weightedOnly, confirmedCritical = false)
         assertTrue("legend lied: $legend", !legend.contains("critical findings present"))
-        assertTrue(legend.startsWith("no critical findings"))
-        assertNotEquals(gradeLegend('F', hasCritical = true), legend)
+        assertTrue(legend.startsWith("no confirmed critical findings"))
+        assertNotEquals(gradeLegend('F', confirmedCritical = true), legend)
+    }
+
+    /**
+     * A CRITICAL lead no longer grades F, so a report can show a CRITICAL row
+     * above an A–D legend. Saying "no critical findings" there is a contradiction;
+     * the legend must scope the claim to confirmed facts.
+     */
+    @Test
+    fun aCriticalLeadCannotSitBesideALegendClaimingNoCriticalFindings() {
+        val leadOnly = gradeLegend('A', confirmedCritical = false)
+        assertTrue(leadOnly, leadOnly.contains("no confirmed critical findings"))
+        assertFalse("a suspected lead must not be promoted", leadOnly.contains("critical findings present"))
+        assertEquals("critical findings present", gradeLegend('F', confirmedCritical = true))
     }
 
     // ---------------------------------------------------------------- C5

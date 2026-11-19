@@ -213,6 +213,21 @@ class ReportExportTest {
     }
 
     @Test
+    fun markdownPresentsObfuscationAsASymbolCountHeuristic() {
+        val present = ReportExport.toMarkdown(
+            report().copy(framework = FrameworkInfo(isFlutter = true, obfuscated = false)),
+        )
+        assertTrue(present, present.contains("names present (heuristic)"))
+        assertFalse("a symbol count is not an obfuscation verdict", present.contains("obfuscated=false"))
+
+        val few = ReportExport.toMarkdown(
+            report().copy(framework = FrameworkInfo(isFlutter = true, obfuscated = true)),
+        )
+        assertTrue(few, few.contains("few names (heuristic)"))
+        assertFalse(few, few.contains("obfuscated=true"))
+    }
+
+    @Test
     fun evidenceFieldsScrubsTheSourcePath() {
         val e = Evidence("assets/$secret.env", 0, "masked")
         val fields = ReportExport.evidenceFields(e, sensitive = false, secrets = listOf(secret)).toMap()

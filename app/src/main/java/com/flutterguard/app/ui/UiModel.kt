@@ -160,18 +160,20 @@ fun severitySummary(stats: ReportStats): List<SeveritySummaryRow> = listOf(
 /**
  * Why a grade was awarded, in words.
  *
- * [hasCritical] is not inferable from the letter: `gradeOf` also returns `F` for a high weighted
- * score with no critical finding, so the legend must be told which case it is.
+ * [confirmedCritical] is not inferable from the letter: `gradeOf` also returns `F` for a high
+ * weighted score with no critical finding, so the legend must be told which case it is. It
+ * counts CONFIRMED critical facts only: a CRITICAL lead does not grade an app, and the legend
+ * must not contradict the severity row that shows the lead.
  */
-fun gradeLegend(grade: Char, hasCritical: Boolean = false): String = when (grade.uppercaseChar()) {
-    'A' -> "no critical findings, minimal weighted severity"
-    'B' -> "no critical findings, low weighted severity"
-    'C' -> "no critical findings, moderate weighted severity"
-    'D' -> "no critical findings, high weighted severity"
-    'F' -> if (hasCritical) {
+fun gradeLegend(grade: Char, confirmedCritical: Boolean = false): String = when (grade.uppercaseChar()) {
+    'A' -> "no confirmed critical findings, minimal weighted severity"
+    'B' -> "no confirmed critical findings, low weighted severity"
+    'C' -> "no confirmed critical findings, moderate weighted severity"
+    'D' -> "no confirmed critical findings, high weighted severity"
+    'F' -> if (confirmedCritical) {
         "critical findings present"
     } else {
-        "no critical findings, weighted severity past the D threshold"
+        "no confirmed critical findings, weighted severity past the D threshold"
     }
     else -> ReportMetadata.UNAVAILABLE
 }

@@ -1,6 +1,7 @@
 package com.flutterguard.app.ui
 
 import com.flutterguard.app.scan.Report
+import com.flutterguard.app.scan.ReportExport
 import java.util.Locale
 
 /** One real, report-derived metadata row. Missing values say "not available". */
@@ -23,7 +24,7 @@ object ReportMetadata {
             MetadataRow("Flutter engine", framework.engineVersion?.take(80) ?: UNAVAILABLE),
             MetadataRow("Dart runtime", framework.dartVersion ?: UNAVAILABLE),
             MetadataRow("Build mode", framework.buildMode ?: UNAVAILABLE),
-            MetadataRow("Obfuscated", framework.obfuscated?.toString() ?: UNAVAILABLE),
+            MetadataRow("Dart symbols", ReportExport.dartSymbolsLabel(framework.obfuscated) ?: UNAVAILABLE),
             MetadataRow(
                 "APK parts",
                 if (report.meta.splitCount > 0) "$parts parts (${report.meta.splitCount} split)"

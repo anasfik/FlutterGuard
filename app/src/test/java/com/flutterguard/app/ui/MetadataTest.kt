@@ -62,7 +62,18 @@ class MetadataTest {
         assertEquals("not available", value(rows, "Flutter engine"))
         assertEquals("not available", value(rows, "Dart runtime"))
         assertEquals("not available", value(rows, "Build mode"))
-        assertEquals("not available", value(rows, "Obfuscated"))
+        assertEquals("not available", value(rows, "Dart symbols"))
+    }
+
+    @Test
+    fun dartSymbolsAreLabelledAsAHeuristicNotAVerdict() {
+        // `obfuscated` is derived from libapp.so string-table counts, so no row may
+        // print it as a definitive yes/no about obfuscation.
+        val few = ReportMetadata.rows(report(FrameworkInfo(isFlutter = true, obfuscated = true)))
+        assertEquals("few names (heuristic)", value(few, "Dart symbols"))
+
+        val many = ReportMetadata.rows(report(FrameworkInfo(isFlutter = true, obfuscated = false)))
+        assertEquals("names present (heuristic)", value(many, "Dart symbols"))
     }
 
     @Test

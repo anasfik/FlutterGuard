@@ -43,9 +43,15 @@ jobs:
             --json out/flutterguard-report.json \
             --sarif out/flutterguard-report.sarif
 
-      # Runs only once the benchmark harness is tracked in the repository.
+      # Runs only where the pre-built fixtures exist. The three required sample
+      # APKs under benchmark-app/dist are built locally and gitignored, so a fresh
+      # CI checkout skips the benchmark instead of failing on missing samples.
       - name: Assertion benchmark
-        if: hashFiles('benchmarks/harness.py') != ''
+        if: >-
+          hashFiles('benchmarks/harness.py') != '' &&
+          hashFiles('benchmark-app/dist/benchmark-debug.apk') != '' &&
+          hashFiles('benchmark-app/dist/benchmark-plain-release.apk') != '' &&
+          hashFiles('benchmark-app/dist/benchmark-obfuscated-release.apk') != ''
         run: |
           python3 benchmarks/harness.py \
             --manifest benchmarks/manifests/flutter-fixtures.json \

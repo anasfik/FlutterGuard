@@ -80,7 +80,10 @@ object ReportJson {
             engineDebug = frameworkJson?.bool("engineDebug") ?: false,
             libappMissing = frameworkJson?.bool("libappMissing") ?: false,
             // Optional in the schema: absent means unknown, never a default claim.
-            snapshotKind = frameworkJson?.str("snapshotKind"),
+            // Only a known SnapshotKind label is a kind; a hand-edited number or
+            // unknown string decodes as unknown instead of rendering verbatim.
+            snapshotKind = frameworkJson?.str("snapshotKind")
+                ?.takeIf { s -> SnapshotKind.entries.any { it.label == s } },
             snapshotHash = frameworkJson?.str("snapshotHash"),
             snapshotFeatures = frameworkJson?.array("snapshotFeatures").strings().orEmpty(),
         )

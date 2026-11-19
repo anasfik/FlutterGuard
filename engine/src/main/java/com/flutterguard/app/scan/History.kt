@@ -170,6 +170,19 @@ object History {
         return out
     }
 
+    /**
+     * Diff a new snapshot against the newest scan recorded in [previousLog].
+     *
+     * The log keeps up to [ScanLog.MAX_ENTRIES] blocks; diffing the whole text
+     * would accumulate the extended categories across every block and subtract
+     * any older `cut:` globally, blaming today's scan for an old removal and
+     * hiding a re-added value. An empty or unparseable log has no baseline.
+     */
+    fun diffAgainstLatestIn(previousLog: String, snapshot: String): List<String> {
+        val latest = ScanLog.decode(previousLog).lastOrNull()?.snapshot ?: return emptyList()
+        return diff(latest, snapshot)
+    }
+
     /** One explicit `?` line per category that was skipped, worded for the side that lacks it. */
     private fun notesFor(
         oldMissing: Set<DiffCategory>,

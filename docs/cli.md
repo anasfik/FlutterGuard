@@ -84,9 +84,10 @@ the owned fixture, scans it into JSON + SARIF, retains both as workflow
 artifacts for 14 days, and (in a separate job) uploads the SARIF to code
 scanning. Only that upload job requests `security-events: write` (plus
 `actions: read`, which `upload-sarif` needs on private repositories); fork pull
-requests skip it, which does not fail the job. The benchmark step is guarded on
-`benchmarks/harness.py` being tracked, so it stays inert until that harness
-lands in the repository.
+requests skip it, which does not fail the job. The benchmark step runs only where
+its pre-built fixtures exist: the three required `benchmark-app/dist/*.apk`
+samples are built locally and are not committed, so a fresh checkout skips the
+step instead of failing on missing samples.
 
 The workflow does not use `--fail-on`: FlutterGuard's debug build legitimately
 contains `CONFIRMED` findings (debuggable manifest, debug certificate), so the

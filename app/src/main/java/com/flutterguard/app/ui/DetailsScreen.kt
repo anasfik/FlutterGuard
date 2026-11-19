@@ -88,6 +88,7 @@ import com.flutterguard.app.scan.ReportSection
 import com.flutterguard.app.scan.RouteTree
 import com.flutterguard.app.scan.ScanLog
 import com.flutterguard.app.scan.ScanNamespace
+import com.flutterguard.app.scan.Severity
 import com.flutterguard.app.scan.StoredReport
 import com.flutterguard.app.scan.ScanLogEntry
 import com.flutterguard.app.scan.ScanPhase
@@ -391,12 +392,17 @@ private fun OverviewSection(
                 if (report.framework.isFlutter) {
                     InfoLine("Flutter", "yes — ${report.framework.buildMode ?: ReportMetadata.UNAVAILABLE}")
                     InfoLine("Dart", report.framework.dartVersion ?: ReportMetadata.UNAVAILABLE)
-                    InfoLine("Obfuscated", report.framework.obfuscated?.toString() ?: ReportMetadata.UNAVAILABLE)
+                    InfoLine("Dart symbols", ReportExport.dartSymbolsLabel(report.framework.obfuscated) ?: ReportMetadata.UNAVAILABLE)
                     report.framework.kernelBlobBytes?.let { InfoLine("kernel_blob.bin", "${humanBytes(it)} — readable Dart") }
                     report.framework.snapshotBytes?.takeIf { it > 0 }?.let { InfoLine("JIT snapshots", humanBytes(it)) }
                     // Bounded header fact: kind + opaque hash, never an engine version.
-                    report.framework.snapshotKind?.let {
-                        InfoLine("Dart snapshot", "$it — ${report.framework.snapshotHash ?: ReportMetadata.UNAVAILABLE}")
+                    // The hash alone is the evidence, so it copies like the SHA-256 row.
+                    report.framework.snapshotKind?.let { kind ->
+                        InfoLine(
+                            "Dart snapshot ($kind)",
+                            report.framework.snapshotHash ?: ReportMetadata.UNAVAILABLE,
+                            copyable = true,
+                        )
                     }
                     if (report.framework.engineDebug) InfoLine("Engine", "debug build")
                     if (report.framework.dartDeps.isNotEmpty()) {
@@ -606,7 +612,7 @@ private fun GradeCard(report: Report) {
                         StatLine(row.label, row.count, row.severity)
                     }
                     Text(
-                        "Grade $grade — ${gradeLegend(grade, report.stats.critical > 0)}",
+                        "Grade $grade — ${gradeLegend(grade, confirmedCritical = report.findings.count { it.kind == FindingKind.CONFIRMED && it.severity == Severity.CRITICAL } > 0)}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

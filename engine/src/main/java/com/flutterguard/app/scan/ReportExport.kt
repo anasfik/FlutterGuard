@@ -23,6 +23,17 @@ object ReportExport {
     val allSections: Set<ReportSection> = ReportSection.entries.toSet()
 
     /**
+     * Label for the libapp.so symbol counts. `FlutterRules` derives the boolean
+     * from `packageUriCount`/`camelCount`, which measures the string table, not
+     * obfuscation; every presentation must say so. Null stays unknown.
+     */
+    fun dartSymbolsLabel(obfuscated: Boolean?): String? = when (obfuscated) {
+        true -> "few names (heuristic)"
+        false -> "names present (heuristic)"
+        null -> null
+    }
+
+    /**
      * Field/value pairs for one evidence row. Default: source/offset/snippet
      * only (source scrubbed against [secrets]). Sensitive: adds the retained
      * value when present. [secrets] also scrubs the snippet (idempotent on
@@ -221,7 +232,7 @@ object ReportExport {
                 if (safe.meta.fileScan) {
                     appendLine("- Source: **picked APK file** — package identity comes from the manifest, not an installed app.")
                 }
-                appendLine("- Framework: ${if (safe.framework.isFlutter) "Flutter ${safe.framework.dartVersion ?: ""} (${safe.framework.buildMode ?: "?"}, obfuscated=${safe.framework.obfuscated})" else safe.framework.otherFrameworks.joinToString().ifEmpty { "native" }}")
+                appendLine("- Framework: ${if (safe.framework.isFlutter) "Flutter ${safe.framework.dartVersion ?: ""} (${safe.framework.buildMode ?: "?"}, Dart symbols: ${dartSymbolsLabel(safe.framework.obfuscated) ?: "unknown"})" else safe.framework.otherFrameworks.joinToString().ifEmpty { "native" }}")
                 appendLine("- Signing: ${safe.signing.schemes.joinToString("/").ifEmpty { "?" }}${if (safe.signing.debugCert) " · DEBUG CERT" else ""} · SHA-256 ${safe.signing.sha256Fingerprint?.take(16)}…")
                 appendLine("- Grade: **${safe.grade}** — ${safe.stats.critical} critical, ${safe.stats.high} high, ${safe.stats.medium} medium, ${safe.stats.low} low, ${safe.stats.info} info (${safe.stats.stringsScanned} strings scanned in ${safe.stats.durationMs / 1000}s)")
                 appendLine("- Confidence: $confirmed confirmed, $suspected suspected, $informational informational — the grade counts confirmed artifact facts only; leads are never scored and nothing here proves exploitability")
