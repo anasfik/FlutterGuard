@@ -9,6 +9,10 @@
 Open an installed Flutter app, or a single APK, and read its libraries, endpoints and exposed
 strings. The whole audit runs on your phone: no uploads, no account, no setup.
 
+Every result is sorted into **confirmed artifact facts**, **leads worth checking** and plain
+**inventory**, so a string match never reads as an exploit. Scan the same app twice and it tells you
+what actually changed between the two releases.
+
 [![Release](https://img.shields.io/github/v/release/anasfik/flutterguard?display_name=tag&sort=semver)](https://github.com/anasfik/flutterguard/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/android-8.0%2B-3ddc84.svg)](#install)
@@ -59,6 +63,12 @@ It is free, open source, and it never sends your data anywhere.
 - **Package policy** — permissions, signing information and network-security configuration.
 - **App structure** — Flutter assets and candidate route strings, kept as clues rather than
   pretend navigation.
+- **Confidence** — each finding is an accepted fact from the package (a decoded policy, a real
+  manifest attribute), a lead that needs a human eye, or informational inventory.
+- **Dart snapshot evidence** — the compiled library's snapshot header, kind, build features and
+  serialization hash, read directly from the artifact when the format is recognised.
+- **Release changes** — compare two scans to see new permissions, hosts, SDKs, native libraries,
+  signing certificates, network policy and findings, plus what disappeared.
 - **Reports** — saved on the phone, ready to revisit, and exportable as JSON or Markdown when you
   ask for it.
 
@@ -89,7 +99,36 @@ Android 8.0 or newer. No Play Services needed.
 ## What the grade means
 
 `A` is clean, `C` is a well-built app with a few hardening gaps, `F` failed on something
-fundamental. It is a triage label, not a score: read the findings, not the letter.
+fundamental. Only confirmed artifact facts feed the grade, so an unproven lead can never sink an
+app on its own. It is a triage label, not a score: read the findings, not the letter.
+
+## Comparing two releases
+
+Scan a version, install the next one, scan again. The report shows what arrived and what left:
+permissions, endpoints, SDK and dependency markers, native libraries, signing certificates, the
+network-security policy, and the findings themselves.
+
+Comparisons are built from the saved reports, never from a guess. If a category could not be read
+in one of the two scans, it says so instead of claiming nothing changed, and a scan of a different
+package is refused rather than diffed against an unrelated app. Finding identities carry the rule
+and a masked source, never the matched value, so an exported comparison stays safe to share.
+
+## From a terminal or CI
+
+The detection engine is a plain JVM library, and the CLI runs it without Android:
+
+```bash
+flutterguard scan app-release.apk --json report.json --sarif report.sarif --fail-on confirmed
+```
+
+- exit `0` when nothing confirmed crossed the gate, `1` when something did, `2` for any argument,
+  input, scan or output error
+- the JSON report matches the schema the app writes, so the same file works everywhere
+- SARIF points at the APK, one rule per finding id, with no invented source lines
+- outputs are published atomically and progress goes to stderr without recovering values
+
+The workflow in `.github/workflows/apk-scan.yml` runs the tests, scans a build, and uploads the
+report; `docs/cli.md` has the full contract.
 
 ## Honest limits
 
@@ -97,6 +136,9 @@ A tool that overstates itself is worse than none, so:
 
 - It reads the package. Nothing is hooked, intercepted or executed.
 - Findings are static evidence, not proof that something is exploitable.
+- A snapshot header describes how the Dart library was built. It carries no obfuscation flag, no
+  app identity and no version, so when the format is not recognised the field stays unknown.
+- "Few names recovered" is a heuristic about a string table, not a verdict that code is obfuscated.
 - It reads APKs. Convert an AAB with `bundletool` first.
 - Some phones block reading other apps' files. That is the OS deciding, not a setting in the app.
 - Only scan apps you own or are allowed to test.
@@ -107,11 +149,17 @@ A tool that overstates itself is worse than none, so:
 git clone https://github.com/anasfik/flutterguard.git
 cd flutterguard
 echo "sdk.dir=$ANDROID_HOME" > local.properties
-./gradlew assembleRelease        # signed APK in app/build/outputs/apk/release/
+./gradlew assembleRelease          # signed APK in app/build/outputs/apk/release/
+./gradlew :cli:installDist         # CLI launcher in cli/build/install/flutterguard/bin/
 ```
 
 Release builds read `FG_KEYSTORE`, `FG_KEYSTORE_PASSWORD`, `FG_KEY_ALIAS` and `FG_KEY_PASSWORD`,
 falling back to `.keystore/flutterguard.jks`. Debug builds use the debug key.
+
+Three Gradle modules share one detection engine: `app` (Compose UI and platform access), `engine`
+(pure JVM scanners, rules and report models) and `cli` (the CI entry point). `benchmark-app/` is a
+synthetic Flutter app with planted findings, and `benchmarks/` scores the CLI against it — the
+harness only counts assertions it was told to judge, so its numbers stay honest.
 
 `skill/SKILL.md` turns the app into an audit workflow for coding agents, and `CORPUS.md` records
 the real app that produced each detector. Kotlin and Jetpack Compose, Material 3, one colour

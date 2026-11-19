@@ -1,0 +1,22 @@
+FlutterGuard 0.4.0 — the detection release.
+
+Same offline auditor, with the findings now sorted by how much they actually prove.
+
+- Confirmed artifact facts, leads worth checking and plain inventory are separated in every
+  report. The grade only counts the confirmed facts, so an unproven lead cannot sink an app.
+- Scan a version, install the next, scan again: new and removed permissions, endpoints, SDKs,
+  native libraries, signing certificates, network policy and findings are listed side by side.
+  Categories that could not be read say so instead of claiming nothing changed.
+- Compiled Dart libraries are read further: snapshot kind, build features and serialization hash
+  come from the artifact itself when the format is recognised, and stay unknown when it is not.
+- The "few names recovered" line is now labelled as the heuristic it is, not a verdict.
+- A JVM CLI runs the same engine without Android: `flutterguard scan app.apk --json out.json`
+  with optional SARIF output and a confirmed-only gate for CI.
+
+Nothing changed in what a scan does to your data: no network permission, no accounts, no
+telemetry, reports stay on the device until you export or delete them.
+
+Upgrading from an older GitHub APK: builds since 0.3.4 use a newer signing key, so Android will
+refuse to install one over the other. Export any reports you want to keep, uninstall FlutterGuard,
+then install this APK. Uninstalling removes the in-app reports, history and settings, and exports
+do not restore the history. Play installs are re-signed by Google and are not affected.

@@ -12,10 +12,11 @@ android {
         applicationId = "com.flutterguard.app"
         minSdk = 26
         targetSdk = 36
-        // 0.3.2 (code 7) is the first Play release and is under review; 0.3.4
-        // is the GitHub-only build until that review lands.
-        versionCode = 9
-        versionName = "0.3.4"
+        // 0.4.0 ships the detection roadmap: separate confidence classes, release
+        // diffing, Dart snapshot evidence and a JVM CLI. Version code moves past
+        // the 0.3.4 GitHub build and the code 7 Play review.
+        versionCode = 10
+        versionName = "0.4.0"
     }
 
     signingConfigs {
