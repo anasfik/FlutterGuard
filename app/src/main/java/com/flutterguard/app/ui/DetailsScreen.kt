@@ -778,7 +778,7 @@ private fun DeepLinkLine(link: DeepLink) {
 @Composable
 private fun FindingsSection(report: Report, listState: LazyListState) {
     val secrets = report.secretValues()
-    val groups = remember(report.findings) { findingGroups(report.findings) }
+    val ordered = remember(report.findings) { sortedFindings(report.findings) }
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -797,31 +797,38 @@ private fun FindingsSection(report: Report, listState: LazyListState) {
         if (report.findings.isEmpty()) {
             item { EmptyState("No findings", "The rules found nothing matching in the readable artifacts.") }
         } else {
-            groups.forEach { (kind, findings) ->
-                item(key = "finding-group-$kind") {
-                    Text(
-                        "${findingGroupLabel(kind)} (${findings.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(top = Space.l).semantics { heading() },
-                    )
-                }
-                items(findings) { finding ->
-                    FindingCard(finding, report.meta.packageName, secrets)
-                }
+            item {
+                val confirmed = report.findings.count { it.kind == FindingKind.CONFIRMED }
+                val leads = report.findings.count { it.kind == FindingKind.SUSPECTED }
+                val inventory = report.findings.count { it.kind == FindingKind.INFORMATIONAL }
+                Text(
+                    "$confirmed confirmed · $leads leads · $inventory inventory — ordered by importance",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = Space.s),
+                )
+            }
+            items(ordered) { finding ->
+                FindingCard(finding, report.meta.packageName, secrets)
             }
         }
     }
 }
 
 /**
- * Findings grouped by what the artifact proves, in one fixed order:
- * confirmed facts, leads, inventory. Empty groups are kept so a scan that
- * confirmed nothing says "0" instead of hiding the distinction.
+ * Every finding in one worst-first list: severity decides the order, with the
+ * confidence kind breaking ties (confirmed before leads before inventory).
+ * Sorting globally means a CRITICAL lead appears before a LOW confirmed fact.
  */
-internal fun findingGroups(findings: List<Finding>): List<Pair<FindingKind, List<Finding>>> =
-    FindingKind.entries.map { kind ->
-        kind to findings.filter { it.kind == kind }.sortedBy { severityRank(it.severity) }
-    }
+internal fun sortedFindings(findings: List<Finding>): List<Finding> =
+    findings.sortedWith(compareBy({ severityRank(it.severity) }, { findingKindRank(it.kind) }))
+
+/** Confidence tie-break for equal severities; confirmed facts outrank leads. */
+internal fun findingKindRank(kind: FindingKind): Int = when (kind) {
+    FindingKind.CONFIRMED -> 0
+    FindingKind.SUSPECTED -> 1
+    FindingKind.INFORMATIONAL -> 2
+}
 
 /**
  * Importance order of a finding, worst first. Spelled out instead of using the
@@ -880,6 +887,17 @@ private fun FindingCard(finding: Finding, packageName: String, secrets: List<Str
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    shape = MaterialTheme.shapes.extraSmall,
+                ) {
+                    Text(
+                        findingGroupLabel(finding.kind),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = Space.s, vertical = Space.xs),
+                    )
+                }
             }
             if (expanded) {
                 Spacer(Modifier.height(8.dp))

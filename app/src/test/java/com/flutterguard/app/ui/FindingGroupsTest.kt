@@ -4,59 +4,62 @@ import com.flutterguard.app.scan.Finding
 import com.flutterguard.app.scan.FindingKind
 import com.flutterguard.app.scan.Severity
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** W1: the findings list is grouped by what the artifact proves, in one order. */
+/** The findings list is one severity-ordered list, worst first. */
 class FindingGroupsTest {
 
     private fun finding(id: String, severity: Severity = Severity.MEDIUM) =
         Finding(id, "t", severity, "d", emptyList(), "r")
 
     @Test
-    fun groupsAreOrderedFactsThenLeadsThenInventory() {
+    fun findingsAreOrderedGloballyCriticalToLow() {
+        // A CRITICAL lead must precede a LOW confirmed fact: severity dominates kind.
+        val findings = listOf(
+            finding("MAN-SHAREDUID", Severity.LOW),       // confirmed LOW
+            finding("SEC-TEST-INFO", Severity.INFO),
+            finding("MAN-DEBUG", Severity.HIGH),          // confirmed HIGH
+            finding("SEC-TEST-CRIT", Severity.CRITICAL),  // lead CRITICAL
+            finding("SEC-TEST-LOW", Severity.LOW),
+            finding("SEC-TEST-HIGH", Severity.HIGH),
+            finding("SEC-TEST-MED", Severity.MEDIUM),
+        )
+        assertEquals(
+            listOf(
+                "SEC-TEST-CRIT", "MAN-DEBUG", "SEC-TEST-HIGH", "SEC-TEST-MED",
+                "MAN-SHAREDUID", "SEC-TEST-LOW", "SEC-TEST-INFO",
+            ),
+            sortedFindings(findings).map { it.id },
+        )
+    }
+
+    @Test
+    fun equalSeverityBreaksTiesConfirmedBeforeLead() {
+        val findings = listOf(
+            finding("SEC-TEST-A", Severity.CRITICAL),
+            finding("MAN-DEBUG", Severity.CRITICAL),
+        )
+        assertEquals(
+            listOf("MAN-DEBUG", "SEC-TEST-A"),
+            sortedFindings(findings).map { it.id },
+        )
+    }
+
+    @Test
+    fun everyFindingAppearsExactlyOnce() {
         val findings = listOf(
             finding("FLUT-NOTICES", Severity.INFO),
             finding("SEC-KEY-AWS", Severity.HIGH),
             finding("MAN-DEBUG", Severity.HIGH),
-            finding("NET-CLEARTEXT", Severity.INFO),
-            finding("SEC-KEY-GENERIC"),
         )
-        val groups = findingGroups(findings)
-
-        assertEquals(listOf(FindingKind.CONFIRMED, FindingKind.SUSPECTED, FindingKind.INFORMATIONAL), groups.map { it.first })
-        assertEquals(listOf("MAN-DEBUG"), groups[0].second.map { it.id })
-        assertEquals(listOf("SEC-KEY-AWS", "SEC-KEY-GENERIC"), groups[1].second.map { it.id })
-        assertEquals(listOf("FLUT-NOTICES", "NET-CLEARTEXT"), groups[2].second.map { it.id })
-        // Every finding appears exactly once; nothing is invented or dropped.
-        assertEquals(findings.size, groups.sumOf { it.second.size })
+        val sorted = sortedFindings(findings)
+        assertEquals(findings.size, sorted.size)
+        assertEquals(findings.toSet(), sorted.toSet())
     }
 
     @Test
-    fun findingsAreOrderedCriticalToLowInsideEachGroup() {
-        // Unknown IDs are leads by default, so one group holds every severity here.
-        val findings = listOf(
-            finding("SEC-TEST-INFO", Severity.INFO),
-            finding("SEC-TEST-LOW", Severity.LOW),
-            finding("SEC-TEST-CRIT", Severity.CRITICAL),
-            finding("SEC-TEST-MED", Severity.MEDIUM),
-            finding("SEC-TEST-HIGH", Severity.HIGH),
-            finding("SEC-TEST-CRIT2", Severity.CRITICAL),
-        )
-        val ordered = findingGroups(findings).single { it.first == FindingKind.SUSPECTED }.second.map { it.id }
-        assertEquals(
-            listOf("SEC-TEST-CRIT", "SEC-TEST-CRIT2", "SEC-TEST-HIGH", "SEC-TEST-MED", "SEC-TEST-LOW", "SEC-TEST-INFO"),
-            ordered,
-        )
-    }
-
-    @Test
-    fun emptyGroupsAreKeptSoZeroConfirmedIsVisible() {
-        val groups = findingGroups(listOf(finding("SEC-KEY-AWS", Severity.CRITICAL)))
-        assertEquals(3, groups.size)
-        assertTrue(groups[0].second.isEmpty())
-        assertEquals(1, groups[1].second.size)
-        assertTrue(groups[2].second.isEmpty())
+    fun emptyInputStaysEmpty() {
+        assertEquals(emptyList<Finding>(), sortedFindings(emptyList()))
     }
 
     @Test
