@@ -12,11 +12,11 @@ android {
         applicationId = "com.flutterguard.app"
         minSdk = 26
         targetSdk = 36
-        // 0.4.0 ships the detection roadmap: separate confidence classes, release
-        // diffing, Dart snapshot evidence and a JVM CLI. Version code moves past
-        // the 0.3.4 GitHub build and the code 7 Play review.
-        versionCode = 10
-        versionName = "0.4.0"
+        // 0.4.0 shipped the detection roadmap: separate confidence classes,
+        // release diffing, Dart snapshot evidence and a JVM CLI. 0.4.1 adds the
+        // dashboard Overview, global severity ordering and the MAN-CUSTOMPERM fix.
+        versionCode = 11
+        versionName = "0.4.1"
     }
 
     signingConfigs {
