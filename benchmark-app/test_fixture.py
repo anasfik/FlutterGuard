@@ -61,7 +61,8 @@ def test_required_sources() -> None:
 
 def test_asset_is_registered() -> None:
     pubspec = read(ROOT / "pubspec.yaml")
-    require("assets/test.env" in pubspec, "assets/test.env is not declared in pubspec")
+    for asset in ("assets/test.env", "assets/benchmark-secrets.json", "assets/benchmark-credentials.txt"):
+        require(asset in pubspec, f"{asset} is not declared in pubspec")
     require("uses-material-design: true" in pubspec, "Material design not enabled")
     for forbidden in ("cupertino_icons:", "http:", "dio:", "flutter_dotenv:"):
         require(forbidden not in pubspec, f"unexpected package in pubspec: {forbidden}")
@@ -190,6 +191,113 @@ def test_exported_activity_and_manifest_safety() -> None:
         )
 
 
+def test_hardened_manifest_plants() -> None:
+    """Every high-severity artifact fact the fixture claims to plant is present."""
+    tree = ET.parse(MANIFEST)
+    root = tree.getroot()
+    app = root.find("application")
+    require(app is not None, "manifest has no application element")
+
+    for attr, value in (
+        ("debuggable", "true"),
+        ("usesCleartextTraffic", "true"),
+        ("allowBackup", "true"),
+    ):
+        require(
+            app.get(ANDROID_NS + attr) == value,
+            f"application android:{attr} is not {value}",
+        )
+    require(
+        root.get(ANDROID_NS + "sharedUserId") == "dev.flutterguard.benchmark.shared",
+        "sharedUserId is not declared on the manifest",
+    )
+
+    permissions = {
+        p.get(ANDROID_NS + "protectionLevel") for p in root.findall("permission")
+    }
+    require("dangerous" in permissions, "no dangerous custom permission is declared")
+
+    def component(tag: str, name: str) -> ET.Element:
+        found = app.find(f"{tag}[@{ANDROID_NS}name='.{name}']")
+        require(found is not None, f"{name} is not declared")
+        return found
+
+    for tag, name in (
+        ("activity", "OAuthCallbackActivity"),
+        ("service", "BenchmarkExportedService"),
+        ("receiver", "BenchmarkExportedReceiver"),
+        ("provider", "BenchmarkExportedProvider"),
+    ):
+        node = component(tag, name)
+        require(
+            node.get(ANDROID_NS + "exported") == "true",
+            f"{name} is not explicitly exported",
+        )
+        require(
+            node.get(ANDROID_NS + "permission") is None,
+            f"{name} is permission-guarded, weakening the planted fact",
+        )
+
+    provider = component("provider", "BenchmarkExportedProvider")
+    require(
+        provider.get(ANDROID_NS + "grantUriPermissions") == "true",
+        "provider does not grant URI permissions",
+    )
+
+    schemes = {d.get(ANDROID_NS + "scheme") for d in app.iter("data")}
+    require("benchmark-oauth" in schemes, "OAuth-shaped deep link scheme is missing")
+
+
+def test_exported_component_classes() -> None:
+    directory = (
+        ANDROID / "main" / "kotlin" / "dev" / "flutterguard" / "benchmark_app"
+    )
+    for name, supertype in (
+        ("OAuthCallbackActivity", ": Activity()"),
+        ("BenchmarkExportedService", ": Service()"),
+        ("BenchmarkExportedReceiver", ": BroadcastReceiver()"),
+        ("BenchmarkExportedProvider", ": ContentProvider()"),
+    ):
+        source = read(directory / f"{name}.kt")
+        require(f"package {PACKAGE}" in source, f"{name} package mismatch")
+        require(supertype in source, f"{name} is not an Android {supertype.split()[1]}")
+
+
+def test_planted_secrets_are_synthetic() -> None:
+    """The hardened assets must carry recognisable fake markers, never plausible keys."""
+    for name in ("benchmark-secrets.json", "benchmark-credentials.txt"):
+        text = read(ROOT / "assets" / name)
+        require(".invalid" in text or "FAKE" in text or "BENCHMARK" in text, f"{name} has no synthetic markers")
+        for line in text.splitlines():
+            if not line.strip() or line.strip().startswith(("#", "//", '"', "{", "}")):
+                continue
+            if any(marker in line for marker in ("AKIA", "ghp_", "AIza", "AccountKey", "PREFIX", "PRIVATE KEY")):
+                require(
+                    any(marker in line for marker in ("FAKE", "BENCHMARK", "benchmark")),
+                    f"plausible credential line in {name}: {line.strip()[:40]}",
+                )
+    documents = "\n".join(
+        read(ROOT / "assets" / name) for name in ("benchmark-secrets.json", "benchmark-credentials.txt")
+    )
+    for expected in (
+        "sk_live_",
+        "ghp_",
+        "glpat-",
+        "dckr_pat_",
+        "sb_secret_",
+        "AIza",
+        "AKIA",
+        "AccountKey=",
+        '"type": "service_account"',
+        "sk-ant-",
+        "SG.",
+        "ey",
+        "postgres://",
+        "-----BEGIN RSA PRIVATE KEY-----",
+    ):
+        require(expected in documents, f"planted asset is missing {expected}")
+
+
 def test_no_signing_material() -> None:
     for path in ROOT.rglob("*"):
         if not path.is_file():
@@ -245,6 +353,10 @@ def test_build_recipe_is_explicit() -> None:
 
 
 def test_no_obvious_real_credentials() -> None:
+    synthetic_assets = {
+        ROOT / "assets" / "benchmark-secrets.json",
+        ROOT / "assets" / "benchmark-credentials.txt",
+    }
     forbidden = (
         "AKIA",
         "ghp_",
@@ -255,11 +367,11 @@ def test_no_obvious_real_credentials() -> None:
         "PRIVATE KEY",
     )
     for path in ROOT.rglob("*"):
-        if not path.is_file() or path == Path(__file__):
+        if not path.is_file() or path == Path(__file__) or path in synthetic_assets:
             continue
-        if any(part in {"build", ".dart_tool", ".gradle", "dist"} for part in path.parts):
+        if any(part in {"build", ".dart_tool", ".gradle", "dist", "__pycache__"} for part in path.parts):
             continue
-        if path.suffix in {".png", ".jar", ".lock"}:
+        if path.suffix in {".png", ".jar", ".lock", ".pyc"}:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         for token in forbidden:

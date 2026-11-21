@@ -143,7 +143,7 @@
     {
       "id": "fixture-plain-release",
       "path": "benchmark-app/dist/benchmark-plain-release.apk",
-      "sha256": "3597a330d32c8c450369c9ae549f610c351b46edf7b7c3271a4f43f4011c19de",
+      "sha256": "34e09b90d48dfbff839dc661cd8bb638e8534c55d4044b6d0d861d60708af0e1",
       "required": true,
       "package": "dev.flutterguard.benchmark_app",
       "assertions": [
@@ -155,11 +155,11 @@
           "source": "ZIP contains lib/arm64-v8a/libapp.so and lib/arm64-v8a/libflutter.so (independent zipfile inspection of the pinned digest)."
         },
         {
-          "id": "not-debuggable",
+          "id": "debuggable-artifact",
           "kind": "finding",
           "rule": "MAN-DEBUG",
-          "expect": "absent",
-          "source": "Compiled AndroidManifest.xml has no application-debuggable (aapt2 36.1.0 dump badging); release build type."
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: application android:debuggable=true (suppressed for the deliberate fixture with tools:ignore=HardcodedDebugMode); verified in the compiled manifest with aapt2 xmltree."
         },
         {
           "id": "no-jit-kernel",
@@ -180,21 +180,77 @@
           "kind": "finding",
           "rule": "MAN-EXPORTED-activity",
           "expect": "present",
-          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml:33-41 explicit exported=true without permission; verified in the compiled manifest with aapt2 xmltree."
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: MainActivity, BenchmarkExportedActivity and OAuthCallbackActivity are exported without a permission; verified in the compiled manifest with aapt2 xmltree."
+        },
+        {
+          "id": "exported-service",
+          "kind": "finding",
+          "rule": "MAN-EXPORTED-service",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: BenchmarkExportedService is exported without a permission."
+        },
+        {
+          "id": "exported-provider",
+          "kind": "finding",
+          "rule": "MAN-EXPORTED-provider",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: BenchmarkExportedProvider is exported without a permission and grants URI permissions."
+        },
+        {
+          "id": "exported-receiver",
+          "kind": "finding",
+          "rule": "MAN-EXPORTED-receiver",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: BenchmarkExportedReceiver is exported without a permission."
+        },
+        {
+          "id": "oauth-deeplink",
+          "kind": "finding",
+          "rule": "MAN-DEEPLINK",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: OAuthCallbackActivity declares scheme benchmark-oauth host callback with BROWSABLE; the aggregated deep-link finding is HIGH because the scheme is oauth-shaped."
+        },
+        {
+          "id": "shared-user-id",
+          "kind": "finding",
+          "rule": "MAN-SHAREDUID",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: manifest declares android:sharedUserId=dev.flutterguard.benchmark.shared."
+        },
+        {
+          "id": "custom-dangerous-permission",
+          "kind": "finding",
+          "rule": "MAN-CUSTOMPERM",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: declares dev.flutterguard.benchmark.DANGEROUS with protectionLevel dangerous; the compiled value is the integer 0x1."
+        },
+        {
+          "id": "backup-enabled",
+          "kind": "finding",
+          "rule": "MAN-BACKUP",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: application android:allowBackup=true with no dataExtractionRules or fullBackupContent."
+        },
+        {
+          "id": "cleartext-attribute",
+          "kind": "finding",
+          "rule": "MAN-CLEARTEXT",
+          "expect": "present",
+          "source": "benchmark-app/android/app/src/main/AndroidManifest.xml: application android:usesCleartextTraffic=true alongside a networkSecurityConfig."
         },
         {
           "id": "nsc-cleartext",
           "kind": "finding",
           "rule": "NET-CLEARTEXT",
           "expect": "present",
-          "source": "Same planted NSC source; the compiled release document is res/8G.xml and still has base-config cleartextTrafficPermitted=true, verified with aapt2 xmltree."
+          "source": "benchmark-app/android/app/src/main/res/xml/network_security_config.xml base-config cleartextTrafficPermitted=true; verified in the compiled NSC with aapt2 xmltree."
         },
         {
           "id": "nsc-user-ca",
           "kind": "finding",
           "rule": "NET-USERCA",
           "expect": "present",
-          "source": "Compiled release res/8G.xml still has trust-anchors certificates src=user, verified with aapt2 xmltree."
+          "source": "Same NSC trusts certificates src=user; verified in the compiled NSC."
         },
         {
           "id": "dotenv-asset",
@@ -208,7 +264,42 @@
           "kind": "finding",
           "rule": "SEC-KEY-OPENAI-PROJECT",
           "expect": "present",
-          "source": "The exact synthetic sk-proj- literal is present in lib/arm64-v8a/libapp.so bytes. Semantic: provider-shaped lead only, not a valid credential."
+          "source": "Synthetic sk-proj- literal in lib/main.dart and assets/benchmark-secrets.json; it is not a valid credential."
+        },
+        {
+          "id": "planted-private-key",
+          "kind": "finding",
+          "rule": "SEC-KEY-PRIVATE",
+          "expect": "present",
+          "source": "assets/benchmark-secrets.json carries a synthetic RSA PRIVATE KEY block with FAKE marker text."
+        },
+        {
+          "id": "planted-stripe-key",
+          "kind": "finding",
+          "rule": "SEC-KEY-STRIPE-SECRET",
+          "expect": "present",
+          "source": "assets/benchmark-secrets.json carries a synthetic sk_live_ value."
+        },
+        {
+          "id": "planted-github-token",
+          "kind": "finding",
+          "rule": "SEC-KEY-GITHUB",
+          "expect": "present",
+          "source": "assets/benchmark-secrets.json carries a synthetic ghp_ value."
+        },
+        {
+          "id": "planted-gcp-service-account",
+          "kind": "finding",
+          "rule": "SEC-GCP-SERVICE-ACCOUNT",
+          "expect": "present",
+          "source": "assets/benchmark-secrets.json contains a synthetic service_account marker."
+        },
+        {
+          "id": "planted-db-uri",
+          "kind": "finding",
+          "rule": "SEC-DB-URI",
+          "expect": "present",
+          "source": "assets/benchmark-secrets.json contains synthetic postgres:// and redis:// URIs with inline fake credentials."
         }
       ]
     }

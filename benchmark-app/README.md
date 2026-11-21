@@ -15,16 +15,27 @@ must never be published or installed as a normal app.
 
 ## Planted facts (the oracle by construction)
 
+The manifest is intentionally hostile. Every attribute and component below is a
+planted artifact fact: the compiled APK really carries it. None of it is
+reachable, usable, or exploitable, and no credential is valid.
+
 | # | Fact | Location | Why it is unsafe |
 |---|---|---|---|
 | 1 | Provider-shaped API key literal, `sk-proj-benchmarkFAKE…` | `lib/main.dart` | Secret-shaped literal compiled into Dart code; AOT does not automatically remove a used string. |
 | 2 | `String.fromEnvironment('FG_BENCHMARK_SECRET')` value supplied by `--dart-define` | `lib/main.dart`, build recipe below | Build-time configuration is baked into the AOT snapshot and is readable from the artifact. |
 | 3 | `.env` shipped as a Flutter asset with a synthetic key | `assets/test.env`, registered in `pubspec.yaml` | Configuration files in `flutter_assets/` are packaged and readable without executing the app. |
 | 4 | Permissive network security config: cleartext allowed, user CAs trusted | `android/app/src/main/res/xml/network_security_config.xml` | If the app had network access, it would accept cleartext and user-installed CAs. |
-| 5 | Exported activity with an implicit intent filter and no permission | `AndroidManifest.xml`, `BenchmarkExportedActivity.kt` | Another app can address the component explicitly or through the declared action. The activity itself is inert. |
+| 5 | Exported activities, service, receiver and provider with no permission | `AndroidManifest.xml`, `BenchmarkExportedActivity/Service/Receiver/Provider.kt` | Another app can address each component. The components are inert: the activity and service return immediately, the receiver ignores broadcasts, the provider returns nothing. |
+| 6 | `android:debuggable="true"` on a release build | `AndroidManifest.xml` | A debuggable application can be attached to and inspected at runtime on a device that permits it. |
+| 7 | `android:usesCleartextTraffic="true"` plus a permissive NSC | `AndroidManifest.xml` | The policy allows cleartext HTTP if networking were ever added. |
+| 8 | `android:allowBackup="true"` | `AndroidManifest.xml` | Application data is eligible for cloud or adb backup. |
+| 9 | `android:sharedUserId` declared | `AndroidManifest.xml` | The manifest claims a shared UID namespace, a legacy cross-app data-sharing mechanism. |
+| 10 | Dangerous custom permission declared | `AndroidManifest.xml` | A protection level of `dangerous` is a runtime-granted permission the fixture never uses. |
+| 11 | OAuth-shaped deep link (`benchmark-oauth://callback`) | `AndroidManifest.xml`, `OAuthCallbackActivity.kt` | A browsable custom scheme with an auth-shaped host is a redirect target for token interception if the scheme were trusted. The activity is empty. |
+| 12 | A packaged secrets file with provider-shaped values | `assets/benchmark-secrets.json`, `assets/benchmark-credentials.txt` | Plaintext assets are readable from the APK without executing the app. Values cover OpenAI, Anthropic, Stripe, GitHub, GitLab, npm, Docker Hub, Supabase, Slack, Discord, SendGrid, Telegram, Google, AWS, Azure, GCP service accounts, JWTs, database URIs, basic-auth URLs and an RSA private key block. All are synthetic and marked `FAKE`/`BENCHMARK`. |
 
-The app deliberately displays facts 1–3 as selectable text so release
-tree-shaking cannot remove the literals the fixture claims to contain.
+The app displays facts 1–3 as selectable text so release tree-shaking cannot
+remove the literals the fixture claims to contain.
 
 There is **no `INTERNET` permission** in any project manifest. The generated
 Flutter debug/profile manifests were removed. Confirm the merged permissions

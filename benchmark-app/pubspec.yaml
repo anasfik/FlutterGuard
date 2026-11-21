@@ -16,3 +16,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/test.env
+    - assets/benchmark-secrets.json
+    - assets/benchmark-credentials.txt
