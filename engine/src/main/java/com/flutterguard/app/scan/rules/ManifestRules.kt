@@ -30,6 +30,14 @@ object ManifestRules {
     private fun String.toSdkInt(): Int? =
         if (startsWith("0x", ignoreCase = true)) substring(2).toIntOrNull(16) else toIntOrNull()
 
+    /** Compiled manifests carry the protectionLevel enum as an integer, not the source word. */
+    private fun String.isDangerousProtectionLevel(): Boolean {
+        if (equals("dangerous", ignoreCase = true)) return true
+        val raw = trim()
+        val value = if (raw.startsWith("0x", ignoreCase = true)) raw.substring(2).toIntOrNull(16) else raw.toIntOrNull()
+        return value != null && (value and 0x0f) == 0x1
+    }
+
     private val oauthishSchemes = listOf("oauth", "login", "auth", "callback", "token", " redirect")
 
     fun evaluate(
@@ -101,7 +109,7 @@ object ManifestRules {
             facts.permissionHits.add(
                 PermissionHit(name, protection, riskyPermissions[name] ?: "")
             )
-            if (node.name == "permission" && node.attr("protectionLevel") == "dangerous") findings += finding(
+            if (node.name == "permission" && node.attr("protectionLevel").orEmpty().isDangerousProtectionLevel()) findings += finding(
                 "MAN-CUSTOMPERM", "Custom permission with dangerous protectionLevel",
                 "$name is declared dangerous — any app requesting it gets broad access without signature check.",
                 Severity.MEDIUM, "Use signature protectionLevel for custom permissions.", "MASVS-PLATFORM-2",
