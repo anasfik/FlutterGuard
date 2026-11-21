@@ -33,6 +33,24 @@ class FindingGroupsTest {
     }
 
     @Test
+    fun findingsAreOrderedCriticalToLowInsideEachGroup() {
+        // Unknown IDs are leads by default, so one group holds every severity here.
+        val findings = listOf(
+            finding("SEC-TEST-INFO", Severity.INFO),
+            finding("SEC-TEST-LOW", Severity.LOW),
+            finding("SEC-TEST-CRIT", Severity.CRITICAL),
+            finding("SEC-TEST-MED", Severity.MEDIUM),
+            finding("SEC-TEST-HIGH", Severity.HIGH),
+            finding("SEC-TEST-CRIT2", Severity.CRITICAL),
+        )
+        val ordered = findingGroups(findings).single { it.first == FindingKind.SUSPECTED }.second.map { it.id }
+        assertEquals(
+            listOf("SEC-TEST-CRIT", "SEC-TEST-CRIT2", "SEC-TEST-HIGH", "SEC-TEST-MED", "SEC-TEST-LOW", "SEC-TEST-INFO"),
+            ordered,
+        )
+    }
+
+    @Test
     fun emptyGroupsAreKeptSoZeroConfirmedIsVisible() {
         val groups = findingGroups(listOf(finding("SEC-KEY-AWS", Severity.CRITICAL)))
         assertEquals(3, groups.size)

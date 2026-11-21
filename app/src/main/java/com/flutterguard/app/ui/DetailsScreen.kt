@@ -1,5 +1,11 @@
 package com.flutterguard.app.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -358,7 +364,7 @@ private fun OverviewSection(
         contentPadding = PaddingValues(start = Gutter, end = Gutter, top = Space.l, bottom = Space.xxl),
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
-        item { GradeCard(report) }
+        item { OverviewDashboard(report) }
         if (diff.isNotEmpty()) {
             item {
                 DiffCard(
@@ -588,9 +594,23 @@ internal fun rememberScanLog(
 }
 
 @Composable
-private fun GradeCard(report: Report) {
+private fun OverviewDashboard(report: Report) {
     val grade = report.grade
-    Column(Modifier.fillMaxWidth().padding(vertical = Space.l)) {
+    val rows = severitySummary(report.stats)
+    val total = rows.sumOf { it.count }
+    val confirmed = report.findings.count { it.kind == FindingKind.CONFIRMED }
+    val leads = report.findings.count { it.kind == FindingKind.SUSPECTED }
+    val inventory = report.findings.count { it.kind == FindingKind.INFORMATIONAL }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(Space.l),
+            verticalArrangement = Arrangement.spacedBy(Space.l),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Neutral, not the accent: an F is the worst outcome on this
                 // screen and must never be the most affirmative colour on it.
@@ -603,40 +623,116 @@ private fun GradeCard(report: Report) {
                         grade.toString(),
                         style = MaterialTheme.typography.displaySmall,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = Space.l, vertical = Space.s),
+                        modifier = Modifier.padding(horizontal = Space.xl, vertical = Space.s),
                     )
                 }
                 Spacer(Modifier.width(Space.l))
-                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
-                    severitySummary(report.stats).forEach { row ->
-                        StatLine(row.label, row.count, row.severity)
-                    }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    Text("Grade $grade", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Grade $grade — ${gradeLegend(grade, confirmedCritical = report.findings.count { it.kind == FindingKind.CONFIRMED && it.severity == Severity.CRITICAL } > 0)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "Only confirmed artifact facts are graded; leads worth checking and inventory are listed " +
-                            "but never scored. A grade is not a security guarantee.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "${report.findings.count { it.kind == FindingKind.CONFIRMED }} confirmed · " +
-                            "${report.findings.count { it.kind == FindingKind.SUSPECTED }} leads · " +
-                            "${report.findings.count { it.kind == FindingKind.INFORMATIONAL }} inventory",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "${report.stats.stringsScanned} strings · ${report.stats.durationMs / 1000}s",
+                        gradeLegend(grade, confirmedCritical = report.findings.count {
+                            it.kind == FindingKind.CONFIRMED && it.severity == Severity.CRITICAL
+                        } > 0),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
+
+            // Share of the whole, in severity order: the dashboard reads at a
+            // glance, the exact counts stay in the tiles below it.
+            SeverityMeter(rows, total)
+
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                for (chunk in rows.chunked(3)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        for (row in chunk) {
+                            SeverityTile(row, Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                Text(
+                    "$confirmed confirmed · $leads leads · $inventory inventory",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    "${report.stats.stringsScanned} strings · ${report.stats.durationMs / 1000}s",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Only confirmed artifact facts are graded; leads worth checking and inventory are listed " +
+                        "but never scored. A grade is not a security guarantee.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+    }
+}
+
+/** Proportional severity bar; one merged node so TalkBack reads the whole split. */
+@Composable
+private fun SeverityMeter(rows: List<SeveritySummaryRow>, total: Int) {
+    val description = "Severity distribution: " + rows.joinToString(", ") { "${it.label} ${it.count}" }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(10.dp)
+            .clearAndSetSemantics { contentDescription = description },
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        if (total <= 0) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            )
+        } else {
+            for (row in rows) {
+                if (row.count == 0) continue
+                Box(
+                    Modifier
+                        .weight(row.count.toFloat())
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(severityStyle(row.severity).dot),
+                )
+            }
+        }
+    }
+}
+
+/** One count per severity, zero included: "Critical 0" is a result. */
+@Composable
+private fun SeverityTile(row: SeveritySummaryRow, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = modifier,
+    ) {
+        Column(
+            Modifier.padding(horizontal = Space.m, vertical = Space.s),
+            verticalArrangement = Arrangement.spacedBy(Space.xs),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SeverityDot(row.severity)
+                Spacer(Modifier.width(Space.s))
+                Text("${row.count}", style = MaterialTheme.typography.titleLarge)
+            }
+            Text(
+                row.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 /** Version as the package manager reported it, or the one "unknown" placeholder. */
@@ -648,16 +744,6 @@ private fun sdkRange(report: Report): String {
     val min = report.meta.minSdk
     val target = report.meta.targetSdk
     return if (min != null && target != null) "min $min → target $target" else ReportMetadata.UNAVAILABLE
-}
-
-/** Always drawn, zero included: "Critical 0" is a result, a missing row is not. */
-@Composable
-private fun StatLine(label: String, count: Int, severity: com.flutterguard.app.scan.Severity) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        SeverityDot(severity)
-        Spacer(Modifier.width(Space.s))
-        Text("$label  $count", style = MaterialTheme.typography.titleSmall)
-    }
 }
 
 @Composable
@@ -734,8 +820,21 @@ private fun FindingsSection(report: Report, listState: LazyListState) {
  */
 internal fun findingGroups(findings: List<Finding>): List<Pair<FindingKind, List<Finding>>> =
     FindingKind.entries.map { kind ->
-        kind to findings.filter { it.kind == kind }.sortedBy { it.severity }
+        kind to findings.filter { it.kind == kind }.sortedBy { severityRank(it.severity) }
     }
+
+/**
+ * Importance order of a finding, worst first. Spelled out instead of using the
+ * enum ordinal so a future reorder of [Severity] cannot silently invert a list
+ * a reviewer reads as "most important first".
+ */
+internal fun severityRank(severity: Severity): Int = when (severity) {
+    Severity.CRITICAL -> 0
+    Severity.HIGH -> 1
+    Severity.MEDIUM -> 2
+    Severity.LOW -> 3
+    Severity.INFO -> 4
+}
 
 internal fun findingGroupLabel(kind: FindingKind): String = when (kind) {
     FindingKind.CONFIRMED -> "Confirmed artifact facts"
