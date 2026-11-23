@@ -25,7 +25,8 @@ what actually changed between the two releases.
 [Checklist](https://flutterguard.dev/flutter-security-checklist/) ·
 [Corpus](https://flutterguard.dev/flutter-release-corpus/) ·
 [Changelog](https://flutterguard.dev/changelog/) ·
-[Privacy](https://gwhyyy.com/privacy/flutterguard)**
+[Privacy](https://gwhyyy.com/privacy/flutterguard) ·
+[Case study](https://gwhyyy.com/work/flutterguard)**
 
 <img src="docs/play/feature-1024x500.png" width="800" alt="FlutterGuard — inspect a Flutter app and keep the evidence, offline, on your phone">
 
